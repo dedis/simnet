@@ -4,12 +4,16 @@ go 1.13
 
 require (
 	github.com/BurntSushi/toml v0.3.1
+	github.com/Microsoft/go-winio v0.4.14 // indirect
 	github.com/buger/goterm v0.0.0-20181115115552-c206103e1f37
+	github.com/docker/distribution v2.7.1+incompatible // indirect
+	github.com/docker/docker v1.13.1
+	github.com/docker/go-connections v0.4.0 // indirect
+	github.com/docker/go-units v0.4.0 // indirect
 	github.com/googleapis/gnostic v0.3.1 // indirect
-	github.com/gosuri/uilive v0.0.3
 	github.com/imdario/mergo v0.3.8 // indirect
-	github.com/mattn/go-isatty v0.0.10 // indirect
-	go.dedis.ch/cothority/v3 v3.3.2
+	github.com/opencontainers/go-digest v1.0.0-rc1 // indirect
+	go.dedis.ch/cothority/v3 v3.1.0
 	go.dedis.ch/onet/v3 v3.0.29
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c // indirect
 	golang.org/x/net v0.0.0-20191125084936-ffdde1057850 // indirect
