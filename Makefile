@@ -1,5 +1,5 @@
 run:
-	go run ./simnet/main.go
+	go run ./examples/status.go
 
 clean:
 	kubectl delete deployment simnet
