@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	status "go.dedis.ch/cothority/v3/status/service"
@@ -28,13 +29,17 @@ func (r StatusSimulationRound) Execute(ctx context.Context, tun engine.Tunnel) {
 			si.Address = network.Address("tls://" + addr)
 
 			cl := status.NewClient()
-			rep, err := cl.Request(si)
-			if err != nil {
-				fmt.Println(err)
-				return
+			for i := 0; i < 20; i++ {
+				_, err := cl.Request(si)
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+
+				time.Sleep(100 * time.Millisecond)
 			}
 
-			fmt.Printf("[%s] Status: of %+v\n", ip, rep.Status)
+			fmt.Printf("[%s] Status done.\n", ip)
 		})
 	}
 }

@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,8 +20,6 @@ import (
 )
 
 const (
-	// MeasureInterval is the tick interval of the resource measures.
-	MeasureInterval = 3000 * time.Millisecond
 	// MeasureFileName is the name of the file created to write the measures.
 	MeasureFileName = "data"
 	// DockerSocketPath is the path of the socket used by Docker on Unix machines.
@@ -28,13 +29,11 @@ const (
 )
 
 func main() {
-	fmt.Println("Start monitoring the host")
+	name := flag.String("container", "", "container name prefix")
+	flag.Parse()
 
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT)
-
-	tick := time.NewTicker(MeasureInterval)
-	defer tick.Stop()
 
 	client, err := dockerapi.NewClient("unix://"+DockerSocketPath, "", makeHTTPClient(), nil)
 	if err != nil {
@@ -46,6 +45,16 @@ func main() {
 		panic(err)
 	}
 
+	container, err := findContainer(list, *name)
+	if err != nil {
+		// Print the list of containers for debugging when the expected container
+		// cannot be found.
+		for _, container := range list {
+			fmt.Printf("%v %v\n", container.Names, container.Labels)
+		}
+		panic(err)
+	}
+
 	f, err := os.Create(MeasureFileName)
 	if err != nil {
 		panic(err)
@@ -53,23 +62,28 @@ func main() {
 
 	writer := bufio.NewWriter(f)
 
+	c := make(chan *types.StatsJSON)
+	go streamContainerStats(client, container.ID, c)
+
 	for {
 		select {
 		case <-sigc:
+			// Close the stream with the docker API.
+			close(c)
+
 			f.Close()
-			fmt.Printf("Stop monitoring the host\n")
 			return
-		case <-tick.C:
-			fmt.Printf("%d: update\n", time.Now().Unix())
-			stats, err := readDockerUsage(client, list[0])
-			if err != nil {
-				fmt.Println(err)
+		case stats, ok := <-c:
+			if !ok {
+				return
 			}
 
 			netstat := stats.Networks[DockerNetworkInterface]
 
-			writer.WriteString(fmt.Sprintf("%d,%d,%d\n", time.Now().UnixNano(), netstat.RxBytes, netstat.TxBytes))
+			writer.WriteString(fmt.Sprintf("%d,%d,%d\n", time.Now().Unix(), netstat.RxBytes, netstat.TxBytes))
 			writer.Flush()
+
+			fmt.Printf("%d: %s -- %s\n", time.Now().Unix(), stats.Name, stats.ID)
 		}
 	}
 }
@@ -84,18 +98,40 @@ func makeHTTPClient() *http.Client {
 	return &http.Client{Transport: t}
 }
 
-func readDockerUsage(client *dockerapi.Client, container types.Container) (*types.StatsJSON, error) {
-	reply, err := client.ContainerStats(context.Background(), container.ID, false)
-	if err != nil {
-		return nil, err
+func findContainer(list []types.Container, name string) (types.Container, error) {
+	for _, c := range list {
+		podName := c.Labels["io.kubernetes.pod.name"]
+
+		if podName == "" {
+			return types.Container{}, errors.New("missing label with pod name")
+		}
+
+		if strings.HasPrefix(podName, name) {
+			return c, nil
+		}
 	}
 
+	return types.Container{}, errors.New("container not found")
+}
+
+func streamContainerStats(client *dockerapi.Client, id string, c chan *types.StatsJSON) {
+	reply, err := client.ContainerStats(context.Background(), id, true)
+	if err != nil {
+		close(c)
+	}
+
+	defer reply.Body.Close()
+
+	// TODO: dangerous ?
 	data := &types.StatsJSON{}
-	err = json.NewDecoder(reply.Body).Decode(data)
-	reply.Body.Close()
-	if err != nil {
-		return nil, err
-	}
+	dec := json.NewDecoder(reply.Body)
 
-	return data, nil
+	for {
+		err = dec.Decode(data)
+		if err != nil {
+			return
+		}
+
+		c <- data
+	}
 }

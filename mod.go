@@ -34,5 +34,10 @@ func (sim *Simulation) Run() error {
 		return err
 	}
 
+	err = sim.engine.WriteStats("result.json")
+	if err != nil {
+		return err
+	}
+
 	return nil
 }

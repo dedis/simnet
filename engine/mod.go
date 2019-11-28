@@ -1,8 +1,12 @@
 package engine
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"io"
+	"strconv"
+	"strings"
 )
 
 // Tunnel is an interface that will create tunnels to node of the simulation so
@@ -17,12 +21,68 @@ type Round interface {
 	Execute(ctx context.Context, tun Tunnel)
 }
 
+// NodeStats contains the array of data that represents a timeline of the
+// resource usage of a node.
+type NodeStats struct {
+	Timestamps []int64
+	RxBytes    []uint64
+	TxBytes    []uint64
+}
+
+func parseLine(line string, ns *NodeStats) error {
+	values := strings.Split(line, ",")
+	if len(values) < 3 {
+		return errors.New("missing columns in line")
+	}
+
+	timestamp, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil {
+		return err
+	}
+
+	rx, err := strconv.ParseUint(values[1], 10, 64)
+	if err != nil {
+		return err
+	}
+
+	tx, err := strconv.ParseUint(values[2], 10, 64)
+	if err != nil {
+		return err
+	}
+
+	ns.Timestamps = append(ns.Timestamps, timestamp)
+	ns.RxBytes = append(ns.RxBytes, rx)
+	ns.TxBytes = append(ns.TxBytes, tx)
+
+	return nil
+}
+
+// NewNodeStats creates statistics for a node by reading the reader line by line.
+func NewNodeStats(reader io.Reader) NodeStats {
+	ns := NodeStats{}
+
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parseLine(line, &ns)
+	}
+
+	return ns
+}
+
+// Stats represents the JSON structure of the statistics written for each node.
+type Stats struct {
+	Timestamp int64
+	Nodes     map[string]NodeStats
+}
+
 // SimulationEngine provides the primitives to run a simulation from the
 // deployment, to the execution of the simulation round and finally the
 // cleaning.
 type SimulationEngine interface {
 	Deploy() error
 	Execute(Round) error
+	WriteStats(filepath string) error
 	Clean() error
 }
 

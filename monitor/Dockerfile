@@ -16,6 +16,8 @@ FROM alpine:latest
 
 WORKDIR /root/
 
+RUN apk add iproute2
+
 COPY --from=builder ./simnet/app ./app
 
-CMD [ "./app" ]
+ENTRYPOINT [ "./app" ]
