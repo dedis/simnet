@@ -79,11 +79,18 @@ func main() {
 			}
 
 			netstat := stats.Networks[DockerNetworkInterface]
+			ts := time.Now().Unix()
+			rx := netstat.RxBytes
+			tx := netstat.TxBytes
+			cpu := stats.CPUStats.CPUUsage.TotalUsage
+			mem := stats.MemoryStats.Usage
 
-			writer.WriteString(fmt.Sprintf("%d,%d,%d\n", time.Now().Unix(), netstat.RxBytes, netstat.TxBytes))
+			// Each line has the following values:
+			// TIMESTAMP || RX BYTES || TX BYTES || CPU || MEMORY
+			writer.WriteString(fmt.Sprintf("%d,%d,%d,%d,%d\n", ts, rx, tx, cpu, mem))
 			writer.Flush()
 
-			fmt.Printf("%d: %s -- %s\n", time.Now().Unix(), stats.Name, stats.ID)
+			fmt.Printf("[%d]: %s\n", ts, stats.Name)
 		}
 	}
 }
@@ -122,7 +129,6 @@ func streamContainerStats(client *dockerapi.Client, id string, c chan *types.Sta
 
 	defer reply.Body.Close()
 
-	// TODO: dangerous ?
 	data := &types.StatsJSON{}
 	dec := json.NewDecoder(reply.Body)
 

@@ -12,6 +12,7 @@ import (
 	"github.com/buger/goterm"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -20,10 +21,33 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
-const (
+var (
 	// RouterBasePort defines what will be the first port used when proxying port-forward
 	// to actual simulation nodes. It is then incremented by 1.
 	RouterBasePort = 6000
+
+	// DeamonRequestMemory is the amount of memory for monitoring containers.
+	DeamonRequestMemory = resource.MustParse("8Mi")
+	// DeamonRequestCPU is the number of CPU for monitoring containers.
+	DeamonRequestCPU = resource.MustParse("10m")
+	// DeamonLimitMemory is the maximum amount of memory allocated to monitoring containers in
+	// the simulation pods.
+	DeamonLimitMemory = resource.MustParse("16Mi")
+	// DeamonLimitCPU is the maxmimum number of CPU allocated to monitoring containers in
+	// the simulation pods.
+	DeamonLimitCPU = resource.MustParse("50m")
+	// AppRequestMemory is the amount of memory allocated to app containers in the
+	// simulation pods.
+	AppRequestMemory = resource.MustParse("64Mi")
+	// AppRequestCPU is the number of CPU allocated to app containers in the
+	// simulation pods.
+	AppRequestCPU = resource.MustParse("50m")
+	// AppLimitMemory is the maximum amount of memory allocated to app containers in the
+	// simulation pods.
+	AppLimitMemory = resource.MustParse("256Mi")
+	// AppLimitCPU is the maximum number of CPU allocated to app containers in the
+	// simulation pods.
+	AppLimitCPU = resource.MustParse("100m")
 )
 
 type portTuple struct {
@@ -60,7 +84,7 @@ func NewKubernetesEngine(cfg string, opts ...Option) (*KubernetesEngine, error) 
 	}
 
 	return &KubernetesEngine{
-		nodes:     []string{"node0", "node1", "node2", "node3"}, // TODO: option for number of nodes
+		nodes:     []string{"node0", "node1", "node2", "node3", "node4", "node5"}, // TODO: option for number of nodes
 		config:    config,
 		clientset: client,
 		namespace: "default",
@@ -96,7 +120,7 @@ func (e *KubernetesEngine) Deploy() error {
 	fmt.Println(" ok")
 
 	fmt.Print("Wait deployment...")
-	timeout := time.After(30 * time.Second)
+	timeout := time.After(60 * time.Second)
 	readyCount := 0
 
 	for {
@@ -414,6 +438,16 @@ func makeDeployment(node string) *appsv1.Deployment {
 							Args: []string{
 								"/root/conode setup --non-interactive --port 7770 && /root/conode -d 2 server",
 							},
+							Resources: apiv1.ResourceRequirements{
+								Requests: apiv1.ResourceList{
+									"memory": AppRequestMemory,
+									"cpu":    AppRequestCPU,
+								},
+								Limits: apiv1.ResourceList{
+									"memory": AppLimitMemory,
+									"cpu":    AppLimitCPU,
+								},
+							},
 						},
 						{
 							Name:  "pumba",
@@ -435,6 +469,16 @@ func makeDeployment(node string) *appsv1.Deployment {
 									MountPath: "/var/run/docker.sock",
 								},
 							},
+							Resources: apiv1.ResourceRequirements{
+								Requests: apiv1.ResourceList{
+									"memory": DeamonRequestMemory,
+									"cpu":    DeamonRequestCPU,
+								},
+								Limits: apiv1.ResourceList{
+									"memory": DeamonLimitMemory,
+									"cpu":    DeamonLimitCPU,
+								},
+							},
 						},
 						{
 							Name:            "monitor",
@@ -448,6 +492,16 @@ func makeDeployment(node string) *appsv1.Deployment {
 								{
 									Name:      "dockersocket",
 									MountPath: "/var/run/docker.sock",
+								},
+							},
+							Resources: apiv1.ResourceRequirements{
+								Requests: apiv1.ResourceList{
+									"memory": DeamonRequestMemory,
+									"cpu":    DeamonRequestCPU,
+								},
+								Limits: apiv1.ResourceList{
+									"memory": DeamonLimitMemory,
+									"cpu":    DeamonLimitCPU,
 								},
 							},
 						},
@@ -510,6 +564,16 @@ func (e *KubernetesEngine) makeRouterDeployment() *appsv1.Deployment {
 							ImagePullPolicy: "Never", // TODO: Remove after the image is pushed to DockerHub.
 							Ports:           containerPorts,
 							Args:            args,
+							Resources: apiv1.ResourceRequirements{
+								Requests: apiv1.ResourceList{
+									"memory": DeamonRequestMemory,
+									"cpu":    DeamonRequestCPU,
+								},
+								Limits: apiv1.ResourceList{
+									"memory": DeamonLimitMemory,
+									"cpu":    DeamonLimitCPU,
+								},
+							},
 						},
 					},
 				},

@@ -1,8 +1,8 @@
 run:
 	go run ./examples/status.go
 
-visu:
-	go run ./visu/mod.go
+plot:
+	go run ./visu/mod.go ${ARGS}
 
 clean:
 	kubectl delete deployments -l app=simnet

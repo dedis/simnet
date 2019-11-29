@@ -27,6 +27,8 @@ type NodeStats struct {
 	Timestamps []int64
 	RxBytes    []uint64
 	TxBytes    []uint64
+	CPU        []uint64
+	Memory     []uint64
 }
 
 func parseLine(line string, ns *NodeStats) error {
@@ -50,9 +52,21 @@ func parseLine(line string, ns *NodeStats) error {
 		return err
 	}
 
+	cpu, err := strconv.ParseUint(values[3], 10, 64)
+	if err != nil {
+		return err
+	}
+
+	mem, err := strconv.ParseUint(values[4], 10, 64)
+	if err != nil {
+		return err
+	}
+
 	ns.Timestamps = append(ns.Timestamps, timestamp)
 	ns.RxBytes = append(ns.RxBytes, rx)
 	ns.TxBytes = append(ns.TxBytes, tx)
+	ns.CPU = append(ns.CPU, cpu)
+	ns.Memory = append(ns.Memory, mem)
 
 	return nil
 }
