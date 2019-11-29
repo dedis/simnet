@@ -7,5 +7,5 @@ clean:
 build_monitor:
 	docker build -t dedis/simnet-monitor -f monitor/Dockerfile .
 
-run_monitor:
-	docker run -d -v /var/run/docker.sock:/var/run/docker.sock dedis/simnet-monitor
+build_router:
+	docker build -t dedis/simnet-router -f router/Dockerfile .

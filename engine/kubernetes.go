@@ -20,6 +20,19 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
+const (
+	// RouterBasePort defines what will be the first port used when proxying port-forward
+	// to actual simulation nodes. It is then incremented by 1.
+	RouterBasePort = 6000
+)
+
+type portTuple struct {
+	pod    int32
+	router int32
+}
+
+type routerMapping map[string][]portTuple
+
 // KubernetesEngine is a simulation engine that will deploy simulation nodes on Kubernetes.
 type KubernetesEngine struct {
 	nodes       []string
@@ -28,6 +41,8 @@ type KubernetesEngine struct {
 	clientset   *kubernetes.Clientset
 	options     *Options
 	pods        []apiv1.Pod
+	router      apiv1.Pod
+	mapping     routerMapping
 	executeTime time.Time
 	doneTime    time.Time
 }
@@ -45,10 +60,11 @@ func NewKubernetesEngine(cfg string, opts ...Option) (*KubernetesEngine, error) 
 	}
 
 	return &KubernetesEngine{
-		nodes:     []string{"node0", "node1"},
+		nodes:     []string{"node0", "node1"}, // TODO: option for number of nodes
 		config:    config,
 		clientset: client,
 		namespace: "default",
+		mapping:   make(routerMapping),
 		options:   NewOptions(opts),
 	}, nil
 }
@@ -77,7 +93,7 @@ func (e *KubernetesEngine) Deploy() error {
 		}
 	}
 
-	fmt.Println(" : ok")
+	fmt.Println(" ok")
 
 	fmt.Print("Wait deployment...")
 	timeout := time.After(30 * time.Second)
@@ -99,9 +115,29 @@ func (e *KubernetesEngine) Deploy() error {
 					fmt.Print(goterm.ResetLine(fmt.Sprintf("Wait deployment... %s", cond.Message)))
 				}
 
-				if readyCount >= len(e.nodes) {
+				if readyCount == len(e.nodes) {
+					// Prevent multiple hit for this condition.
+					readyCount++
+
+					fmt.Printf(goterm.ResetLine("Wait deployment... fetching the pods"))
+					err = e.fetchPods()
+					if err != nil {
+						return err
+					}
+
+					err = e.deployRouter()
+					if err != nil {
+						return err
+					}
+
+					// Now wait for the router deployment..
+				} else if readyCount == len(e.nodes)+2 {
+					err = e.fetchRouter()
+					if err != nil {
+						return err
+					}
+
 					fmt.Println(goterm.ResetLine("Wait deployment... ok"))
-					e.fetchPods()
 					return nil
 				}
 			}
@@ -145,6 +181,8 @@ func (e *KubernetesEngine) Execute(round Round) error {
 	round.Execute(ctx, KubernetesTunnel{
 		config:    e.config,
 		namespace: e.namespace,
+		router:    e.router,
+		mapping:   e.mapping,
 		pods:      e.pods,
 	})
 
@@ -212,6 +250,11 @@ func (e *KubernetesEngine) Clean() error {
 		}
 	}
 
+	err = d.Delete("simnet-router", deleteOptions)
+	if err != nil {
+		return err
+	}
+
 	timeout := time.After(30 * time.Second)
 	countDeleted := 0
 
@@ -225,7 +268,7 @@ func (e *KubernetesEngine) Clean() error {
 				countDeleted++
 			}
 
-			if countDeleted >= len(e.nodes) {
+			if countDeleted >= len(e.nodes)+1 {
 				// No more replicas so the deployment is deleted.
 				return nil
 			}
@@ -234,17 +277,56 @@ func (e *KubernetesEngine) Clean() error {
 }
 
 func (e *KubernetesEngine) fetchPods() error {
-	fmt.Printf("Fetch the pods...")
 	pods, err := e.clientset.CoreV1().
 		Pods(e.namespace).
 		List(metav1.ListOptions{LabelSelector: "app=simnet"})
 	if err != nil {
-		fmt.Printf(" err\n")
 		return err
 	}
 
 	e.pods = pods.Items
-	fmt.Printf(" ok\n")
+	return nil
+}
+
+func (e *KubernetesEngine) deployRouter() error {
+	d := e.clientset.AppsV1().Deployments(e.namespace)
+
+	base := int32(RouterBasePort)
+
+	for _, pod := range e.pods {
+		ports := make([]portTuple, 0)
+
+		// expect the first container to be the application.
+		for _, port := range pod.Spec.Containers[0].Ports {
+			ports = append(ports, portTuple{pod: port.ContainerPort, router: base})
+			base++
+		}
+
+		e.mapping[pod.Status.PodIP] = ports
+	}
+
+	// Deploy the router that will redirect port forward tunnels to each pod.
+	_, err := d.Create(e.makeRouterDeployment())
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (e *KubernetesEngine) fetchRouter() error {
+	pods, err := e.clientset.CoreV1().
+		Pods(e.namespace).
+		List(metav1.ListOptions{LabelSelector: "app=simnet-router"})
+	if err != nil {
+		return err
+	}
+
+	if len(pods.Items) != 1 {
+		return errors.New("invalid number of pods")
+	}
+
+	e.router = pods.Items[0]
 	return nil
 }
 
@@ -378,6 +460,56 @@ func makeDeployment(node string) *appsv1.Deployment {
 									Path: "/var/run/docker.sock",
 								},
 							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func (e *KubernetesEngine) makeRouterDeployment() *appsv1.Deployment {
+	containerPorts := make([]apiv1.ContainerPort, 0)
+	args := []string{}
+	for ip, tuples := range e.mapping {
+		for _, t := range tuples {
+			containerPorts = append(containerPorts, apiv1.ContainerPort{
+				Protocol:      apiv1.ProtocolTCP,
+				ContainerPort: t.router,
+			})
+
+			args = append(args, "--proxy", fmt.Sprintf("%d=%s:%d", t.router, ip, t.pod))
+		}
+	}
+
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "simnet-router",
+			Labels: map[string]string{
+				"app": "simnet",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: int32Ptr(1),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": "simnet-router",
+				},
+			},
+			Template: apiv1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app": "simnet-router",
+					},
+				},
+				Spec: apiv1.PodSpec{
+					Containers: []apiv1.Container{
+						{
+							Name:            "router",
+							Image:           "dedis/simnet-router:latest",
+							ImagePullPolicy: "Never", // TODO: Remove after the image is pushed to DockerHub.
+							Ports:           containerPorts,
+							Args:            args,
 						},
 					},
 				},

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
@@ -15,11 +14,18 @@ import (
 	"k8s.io/client-go/transport/spdy"
 )
 
+const (
+	// BaseLocalPort is the first port to use for port forwarding.
+	BaseLocalPort = 5000
+)
+
 // KubernetesTunnel provides the primitive to open tunnels between the host
 // and simulation nodes running inside a cluster.
 type KubernetesTunnel struct {
 	config    *rest.Config
 	namespace string
+	router    apiv1.Pod
+	mapping   map[string][]portTuple
 	pods      []apiv1.Pod
 }
 
@@ -29,29 +35,34 @@ func (t KubernetesTunnel) Create(ip string, exec func(addr string)) error {
 	for _, pod := range t.pods {
 		if pod.Status.PodIP == ip {
 			stop := make(chan struct{}, 1)
-			readyChan := make(chan struct{}, 1)
+			ready := make(chan struct{}, 1)
 
-			go t.forwardPort(pod.Name, []string{"5000:7770", "5001:7771"}, readyChan, stop)
-			<-readyChan
+			ports := []string{}
+			for i, tu := range t.mapping[ip] {
+				ports = append(ports, fmt.Sprintf("%d:%d", BaseLocalPort+i, tu.router))
+			}
+
+			go t.forwardPort(t.router.Name, ports, ready, stop)
+			<-ready
 
 			// Execute the arbitrary code. The ip can be contacted by using the
 			// address provided in parameter.
-			exec("127.0.0.1:5000")
+			exec(fmt.Sprintf("127.0.0.1:%d", BaseLocalPort))
 
 			// The port forwarding is stopped after the execution of the requests.
 			close(stop)
-			time.Sleep(1 * time.Second)
 			return nil
 		}
 	}
 
-	return errors.New("opd not found")
+	return errors.New("pod not found")
 }
 
 func (t KubernetesTunnel) forwardPort(podName string, ports []string, readyChan, stopChan chan struct{}) {
 	roundTripper, upgrader, err := spdy.RoundTripperFor(t.config)
 	if err != nil {
 		fmt.Printf("Tunnel error: %v\n", err)
+		return
 	}
 
 	path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", t.namespace, podName)
@@ -61,13 +72,17 @@ func (t KubernetesTunnel) forwardPort(podName string, ports []string, readyChan,
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: roundTripper}, http.MethodPost, &serverURL)
 	out, errOut := new(bytes.Buffer), new(bytes.Buffer)
 
-	forwarder, err := portforward.New(dialer, ports, stopChan, readyChan, out, errOut)
+	addrs := []string{"0.0.0.0"}
+	forwarder, err := portforward.NewOnAddresses(dialer, addrs, ports, stopChan, readyChan, out, errOut)
 	if err != nil {
 		fmt.Printf("Tunnel error: %v\n", err)
+		close(readyChan)
+		return
 	}
 
 	err = forwarder.ForwardPorts()
 	if err != nil {
 		fmt.Printf("Tunnel error: %v\n", err)
+		close(readyChan)
 	}
 }
