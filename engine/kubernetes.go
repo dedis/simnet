@@ -60,7 +60,7 @@ func NewKubernetesEngine(cfg string, opts ...Option) (*KubernetesEngine, error) 
 	}
 
 	return &KubernetesEngine{
-		nodes:     []string{"node0", "node1"}, // TODO: option for number of nodes
+		nodes:     []string{"node0", "node1", "node2", "node3"}, // TODO: option for number of nodes
 		config:    config,
 		clientset: client,
 		namespace: "default",

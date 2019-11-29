@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -23,25 +24,36 @@ type StatusSimulationRound struct{}
 // Execute will contact each known node and ask for its status.
 func (r StatusSimulationRound) Execute(ctx context.Context, tun engine.Tunnel) {
 	files := ctx.Value(engine.FilesKey("private.toml")).(map[string]interface{})
-	for ip, value := range files {
-		tun.Create(ip, func(addr string) {
-			si := value.(*network.ServerIdentity)
-			si.Address = network.Address("tls://" + addr)
+	wg := sync.WaitGroup{}
 
-			cl := status.NewClient()
-			for i := 0; i < 20; i++ {
-				_, err := cl.Request(si)
-				if err != nil {
-					fmt.Println(err)
-					return
+	base := 5000
+	for ip, value := range files {
+		firstPort := base
+		base += 2
+		wg.Add(1)
+		go func(ip string, value interface{}) {
+			defer wg.Done()
+			tun.Create(firstPort, ip, func(addr string) {
+				si := value.(*network.ServerIdentity)
+				si.Address = network.Address("tls://" + addr)
+
+				cl := status.NewClient()
+				for i := 0; i < 100; i++ {
+					_, err := cl.Request(si)
+					if err != nil {
+						fmt.Println(err)
+						return
+					}
+
+					time.Sleep(100 * time.Millisecond)
 				}
 
-				time.Sleep(100 * time.Millisecond)
-			}
-
-			fmt.Printf("[%s] Status done.\n", ip)
-		})
+				fmt.Printf("[%s] Status done.\n", ip)
+			})
+		}(ip, value)
 	}
+
+	wg.Wait()
 }
 
 func main() {

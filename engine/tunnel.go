@@ -31,7 +31,7 @@ type KubernetesTunnel struct {
 
 // Create opens a tunnel between the simulation IP and the host so that the
 // simulation node can be contacted with the address given in parameter.
-func (t KubernetesTunnel) Create(ip string, exec func(addr string)) error {
+func (t KubernetesTunnel) Create(base int, ip string, exec func(addr string)) error {
 	for _, pod := range t.pods {
 		if pod.Status.PodIP == ip {
 			stop := make(chan struct{}, 1)
@@ -39,7 +39,7 @@ func (t KubernetesTunnel) Create(ip string, exec func(addr string)) error {
 
 			ports := []string{}
 			for i, tu := range t.mapping[ip] {
-				ports = append(ports, fmt.Sprintf("%d:%d", BaseLocalPort+i, tu.router))
+				ports = append(ports, fmt.Sprintf("%d:%d", base+i, tu.router))
 			}
 
 			go t.forwardPort(t.router.Name, ports, ready, stop)
@@ -47,7 +47,7 @@ func (t KubernetesTunnel) Create(ip string, exec func(addr string)) error {
 
 			// Execute the arbitrary code. The ip can be contacted by using the
 			// address provided in parameter.
-			exec(fmt.Sprintf("127.0.0.1:%d", BaseLocalPort))
+			exec(fmt.Sprintf("127.0.0.1:%d", base))
 
 			// The port forwarding is stopped after the execution of the requests.
 			close(stop)

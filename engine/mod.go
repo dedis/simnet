@@ -13,7 +13,7 @@ import (
 // that simulation running on a private network can be accessible on a per
 // needed basis.
 type Tunnel interface {
-	Create(ipaddr string, exec func(addr string)) error
+	Create(base int, ipaddr string, exec func(addr string)) error
 }
 
 // Round is executed during the simulation.
