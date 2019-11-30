@@ -23,8 +23,8 @@ TODO: Docker engine for local simulations ?
 This section describes a setup using Minikube to run a local Kubernetes cluster
 where the simulation can be deployed.
 
-Caveat: Minikube VM does not have the _netem_ module which means Chaos testing
-does not work out of the box and requires a few steps more. TODO: show how.
+Caveat: Minikube VM does not have the _sch_netem_ module which means Chaos
+testing does not work out of the box and requires a few steps more.
 
 ### Install Minikube
 
@@ -78,4 +78,39 @@ make ARGS="-mem" plot
 make ARGS="-tx" plot
 make ARGS="-rx" plot
 
+```
+
+### Chaos testing in Minikube
+
+This section describes the steps to get a local cluster that supports Chaos
+by enabling the right kernel module in the Minikube ISO.
+
+```bash
+cd $HOME/workspace # ... or a different folder
+git clone git@github.com:kubernetes/minikube.git
+
+cd minikube
+make buildroot-image
+make out/minikube.iso
+make linux-menuconfig
+
+# Inside the Kconfig menu, you will to navigate to
+#   --> Networking support
+#   --> Networking options
+#   --> QoS and/or fair queuing
+#   --> Network Emulator (NETEM)
+# Press space until you have <*> for NETEM
+# Finally, save and close the menu
+
+make out/minikube.iso
+./out/minikube delete
+./out/minikube start --iso-url=file://$(pwd)/out/minikube.iso
+```
+
+You can check that you are good to go by checking that the Minikube VM has
+the module enabled.
+
+```bash
+./out/minikube ssh
+$ modprobe sch_netem # should not display an error
 ```
