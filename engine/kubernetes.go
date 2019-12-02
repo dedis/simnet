@@ -38,16 +38,16 @@ var (
 	DeamonLimitCPU = resource.MustParse("50m")
 	// AppRequestMemory is the amount of memory allocated to app containers in the
 	// simulation pods.
-	AppRequestMemory = resource.MustParse("64Mi")
+	AppRequestMemory = resource.MustParse("32Mi")
 	// AppRequestCPU is the number of CPU allocated to app containers in the
 	// simulation pods.
 	AppRequestCPU = resource.MustParse("50m")
 	// AppLimitMemory is the maximum amount of memory allocated to app containers in the
 	// simulation pods.
-	AppLimitMemory = resource.MustParse("256Mi")
+	AppLimitMemory = resource.MustParse("128Mi")
 	// AppLimitCPU is the maximum number of CPU allocated to app containers in the
 	// simulation pods.
-	AppLimitCPU = resource.MustParse("100m")
+	AppLimitCPU = resource.MustParse("200m")
 )
 
 type portTuple struct {
@@ -83,8 +83,13 @@ func NewKubernetesEngine(cfg string, opts ...Option) (*KubernetesEngine, error) 
 		return nil, fmt.Errorf("client: %v", err)
 	}
 
+	nodes := make([]string, 5)
+	for i := range nodes {
+		nodes[i] = fmt.Sprintf("node%d", i)
+	}
+
 	return &KubernetesEngine{
-		nodes:     []string{"node0", "node1", "node2", "node3", "node4", "node5"}, // TODO: option for number of nodes
+		nodes:     nodes,
 		config:    config,
 		clientset: client,
 		namespace: "default",
@@ -120,8 +125,9 @@ func (e *KubernetesEngine) Deploy() error {
 	fmt.Println(" ok")
 
 	fmt.Print("Wait deployment...")
-	timeout := time.After(60 * time.Second)
-	readyCount := 0
+	timeout := time.After(300 * time.Second)
+	readyMap := make(map[string]struct{})
+	routerDone := false
 
 	for {
 		select {
@@ -133,15 +139,14 @@ func (e *KubernetesEngine) Deploy() error {
 
 			for _, cond := range dpl.Status.Conditions {
 				if cond.Type == appsv1.DeploymentAvailable && cond.Status == apiv1.ConditionTrue {
-					readyCount++
+					readyMap[dpl.Name] = struct{}{}
 				} else if cond.Type == appsv1.DeploymentProgressing && cond.Status == apiv1.ConditionTrue {
 					// If the condition Available is not true, the Progressing message is shown.
 					fmt.Print(goterm.ResetLine(fmt.Sprintf("Wait deployment... %s", cond.Message)))
 				}
 
-				if readyCount == len(e.nodes) {
-					// Prevent multiple hit for this condition.
-					readyCount++
+				if len(readyMap) == len(e.nodes) && !routerDone {
+					routerDone = true
 
 					fmt.Printf(goterm.ResetLine("Wait deployment... fetching the pods"))
 					err = e.fetchPods()
@@ -155,7 +160,7 @@ func (e *KubernetesEngine) Deploy() error {
 					}
 
 					// Now wait for the router deployment..
-				} else if readyCount == len(e.nodes)+2 {
+				} else if len(readyMap) == len(e.nodes)+1 {
 					err = e.fetchRouter()
 					if err != nil {
 						return err
@@ -458,10 +463,10 @@ func makeDeployment(node string) *appsv1.Deployment {
 								"gaiadocker/iproute2",
 								"--duration",
 								"1h",
-								"delay",
-								"--time",
-								"10",
-								"re2:app_.*" + node,
+								"loss",
+								"--percent",
+								"30",
+								"re2:.*app_simnet-node0.*",
 							},
 							VolumeMounts: []apiv1.VolumeMount{
 								{
@@ -564,16 +569,6 @@ func (e *KubernetesEngine) makeRouterDeployment() *appsv1.Deployment {
 							ImagePullPolicy: "Never", // TODO: Remove after the image is pushed to DockerHub.
 							Ports:           containerPorts,
 							Args:            args,
-							Resources: apiv1.ResourceRequirements{
-								Requests: apiv1.ResourceList{
-									"memory": DeamonRequestMemory,
-									"cpu":    DeamonRequestCPU,
-								},
-								Limits: apiv1.ResourceList{
-									"memory": DeamonLimitMemory,
-									"cpu":    DeamonLimitCPU,
-								},
-							},
 						},
 					},
 				},
