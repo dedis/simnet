@@ -8,7 +8,7 @@ import (
 	"os"
 	"regexp"
 
-	"go.dedis.ch/simnet/engine"
+	"go.dedis.ch/simnet/strategies"
 	"gonum.org/v1/plot"
 	"gonum.org/v1/plot/plotter"
 	"gonum.org/v1/plot/plotutil"
@@ -38,7 +38,7 @@ func main() {
 	f, err := os.Open("result.json")
 	checkErr(err)
 
-	stats := &engine.Stats{}
+	stats := &strategies.Stats{}
 	dec := json.NewDecoder(bufio.NewReader(f))
 	err = dec.Decode(stats)
 	f.Close()
@@ -79,7 +79,7 @@ func main() {
 	checkErr(err)
 }
 
-func addTxBytes(p *plot.Plot, ns engine.NodeStats) plotter.XYs {
+func addTxBytes(p *plot.Plot, ns strategies.NodeStats) plotter.XYs {
 	points := make(plotter.XYs, len(ns.Timestamps))
 	for i := range points {
 		points[i].X = float64(ns.Timestamps[i])
@@ -89,7 +89,7 @@ func addTxBytes(p *plot.Plot, ns engine.NodeStats) plotter.XYs {
 	return points
 }
 
-func addRxBytes(p *plot.Plot, ns engine.NodeStats) plotter.XYs {
+func addRxBytes(p *plot.Plot, ns strategies.NodeStats) plotter.XYs {
 	points := make(plotter.XYs, len(ns.Timestamps))
 	for i := range points {
 		points[i].X = float64(ns.Timestamps[i])
@@ -99,7 +99,7 @@ func addRxBytes(p *plot.Plot, ns engine.NodeStats) plotter.XYs {
 	return points
 }
 
-func addCPU(p *plot.Plot, ns engine.NodeStats) plotter.XYs {
+func addCPU(p *plot.Plot, ns strategies.NodeStats) plotter.XYs {
 	points := make(plotter.XYs, len(ns.CPU))
 	for i := range points {
 		points[i].X = float64(ns.Timestamps[i])
@@ -109,7 +109,7 @@ func addCPU(p *plot.Plot, ns engine.NodeStats) plotter.XYs {
 	return points
 }
 
-func addMemory(p *plot.Plot, ns engine.NodeStats) plotter.XYs {
+func addMemory(p *plot.Plot, ns strategies.NodeStats) plotter.XYs {
 	points := make(plotter.XYs, len(ns.Memory))
 	for i := range points {
 		points[i].X = float64(ns.Timestamps[i])

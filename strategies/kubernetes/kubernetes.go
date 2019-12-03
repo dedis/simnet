@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"go.dedis.ch/simnet/engine"
+	"go.dedis.ch/simnet/strategies"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -153,7 +153,7 @@ func (e *Engine) makeContext() (context.Context, error) {
 }
 
 // Execute uses the round implementation to execute a simulation round.
-func (e *Engine) Execute(round engine.Round) error {
+func (e *Engine) Execute(round strategies.Round) error {
 	ctx, err := e.makeContext()
 	if err != nil {
 		return err
@@ -171,9 +171,9 @@ func (e *Engine) Execute(round engine.Round) error {
 // WriteStats fetches the stats of the nodes then write them into a JSON
 // formatted file.
 func (e *Engine) WriteStats(filepath string) error {
-	stats := engine.Stats{
+	stats := strategies.Stats{
 		Timestamp: e.executeTime.Unix(),
-		Nodes:     make(map[string]engine.NodeStats),
+		Nodes:     make(map[string]strategies.NodeStats),
 	}
 
 	for _, pod := range e.pods {
@@ -182,7 +182,7 @@ func (e *Engine) WriteStats(filepath string) error {
 			return err
 		}
 
-		stats.Nodes[pod.Name] = engine.NewNodeStats(reader)
+		stats.Nodes[pod.Name] = strategies.NewNodeStats(reader)
 	}
 
 	f, err := os.Create(filepath)

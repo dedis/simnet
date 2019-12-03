@@ -1,17 +1,17 @@
 package simnet
 
 import (
-	"go.dedis.ch/simnet/engine"
+	"go.dedis.ch/simnet/strategies"
 )
 
 // Simulation is a Kubernetes simulation.
 type Simulation struct {
-	engine engine.SimulationEngine
-	round  engine.Round
+	engine strategies.Simulation
+	round  strategies.Round
 }
 
 // NewSimulation creates a new simulation from the engine and the round.
-func NewSimulation(r engine.Round, e engine.SimulationEngine) *Simulation {
+func NewSimulation(r strategies.Round, e strategies.Simulation) *Simulation {
 	return &Simulation{engine: e, round: r}
 }
 

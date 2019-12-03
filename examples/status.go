@@ -14,8 +14,8 @@ import (
 	"go.dedis.ch/onet/v3/app"
 	"go.dedis.ch/onet/v3/network"
 	"go.dedis.ch/simnet"
-	"go.dedis.ch/simnet/engine"
-	"go.dedis.ch/simnet/engine/kubernetes"
+	"go.dedis.ch/simnet/strategies"
+	"go.dedis.ch/simnet/strategies/kubernetes"
 )
 
 // StatusSimulationRound contacts each node of the simulation network and asks
@@ -23,7 +23,7 @@ import (
 type StatusSimulationRound struct{}
 
 // Execute will contact each known node and ask for its status.
-func (r StatusSimulationRound) Execute(ctx context.Context, tun engine.Tunnel) {
+func (r StatusSimulationRound) Execute(ctx context.Context, tun strategies.Tunnel) {
 	files := ctx.Value(kubernetes.FilesKey("private.toml")).(map[string]interface{})
 	wg := sync.WaitGroup{}
 

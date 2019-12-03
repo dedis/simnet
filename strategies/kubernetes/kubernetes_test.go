@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.dedis.ch/simnet/engine"
+	"go.dedis.ch/simnet/strategies"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -259,7 +259,7 @@ type testRound struct {
 	h func(context.Context)
 }
 
-func (tr testRound) Execute(ctx context.Context, tun engine.Tunnel) {
+func (tr testRound) Execute(ctx context.Context, tun strategies.Tunnel) {
 	if tr.h != nil {
 		tr.h(ctx)
 	}

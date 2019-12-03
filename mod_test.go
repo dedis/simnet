@@ -6,21 +6,21 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.dedis.ch/simnet/engine"
+	"go.dedis.ch/simnet/strategies"
 )
 
 type testRound struct{}
 
-func (t testRound) Execute(ctx context.Context, tun engine.Tunnel) {}
+func (t testRound) Execute(ctx context.Context, tun strategies.Tunnel) {}
 
-type testEngine struct {
+type testStrategy struct {
 	errDeploy  error
 	errExecute error
 	errStats   error
 	errClean   error
 }
 
-func (e *testEngine) Deploy() error {
+func (e *testStrategy) Deploy() error {
 	if e.errDeploy != nil {
 		return e.errDeploy
 	}
@@ -28,7 +28,7 @@ func (e *testEngine) Deploy() error {
 	return nil
 }
 
-func (e *testEngine) Execute(engine.Round) error {
+func (e *testStrategy) Execute(strategies.Round) error {
 	if e.errExecute != nil {
 		return e.errExecute
 	}
@@ -36,7 +36,7 @@ func (e *testEngine) Execute(engine.Round) error {
 	return nil
 }
 
-func (e *testEngine) WriteStats(filepath string) error {
+func (e *testStrategy) WriteStats(filepath string) error {
 	if e.errStats != nil {
 		return e.errStats
 	}
@@ -44,7 +44,7 @@ func (e *testEngine) WriteStats(filepath string) error {
 	return nil
 }
 
-func (e *testEngine) Clean() error {
+func (e *testStrategy) Clean() error {
 	if e.errClean != nil {
 		return e.errClean
 	}
@@ -53,30 +53,30 @@ func (e *testEngine) Clean() error {
 }
 
 func TestSimulation_Run(t *testing.T) {
-	engine := &testEngine{}
-	sim := NewSimulation(testRound{}, engine)
+	stry := &testStrategy{}
+	sim := NewSimulation(testRound{}, stry)
 
 	require.NoError(t, sim.Run())
 
-	engine.errDeploy = errors.New("deploy")
+	stry.errDeploy = errors.New("deploy")
 	err := sim.Run()
 	require.Error(t, err)
 	require.Equal(t, "deploy", err.Error())
 
-	engine.errDeploy = nil
-	engine.errExecute = errors.New("execute")
+	stry.errDeploy = nil
+	stry.errExecute = errors.New("execute")
 	err = sim.Run()
 	require.Error(t, err)
 	require.Equal(t, "execute", err.Error())
 
-	engine.errExecute = nil
-	engine.errStats = errors.New("stats")
+	stry.errExecute = nil
+	stry.errStats = errors.New("stats")
 	err = sim.Run()
 	require.Error(t, err)
 	require.Equal(t, "stats", err.Error())
 
-	engine.errStats = nil
-	engine.errClean = errors.New("clean")
+	stry.errStats = nil
+	stry.errClean = errors.New("clean")
 	err = sim.Run()
 	require.Error(t, err)
 	require.Equal(t, "clean", err.Error())

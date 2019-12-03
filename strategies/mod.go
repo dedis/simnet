@@ -1,4 +1,4 @@
-package engine
+package strategies
 
 import (
 	"bufio"
@@ -19,6 +19,16 @@ type Tunnel interface {
 // Round is executed during the simulation.
 type Round interface {
 	Execute(ctx context.Context, tun Tunnel)
+}
+
+// Simulation provides the primitives to run a simulation from the
+// deployment, to the execution of the simulation round and finally the
+// cleaning.
+type Simulation interface {
+	Deploy() error
+	Execute(Round) error
+	WriteStats(filepath string) error
+	Clean() error
 }
 
 // NodeStats contains the array of data that represents a timeline of the
@@ -88,14 +98,4 @@ func NewNodeStats(reader io.Reader) NodeStats {
 type Stats struct {
 	Timestamp int64
 	Nodes     map[string]NodeStats
-}
-
-// SimulationEngine provides the primitives to run a simulation from the
-// deployment, to the execution of the simulation round and finally the
-// cleaning.
-type SimulationEngine interface {
-	Deploy() error
-	Execute(Round) error
-	WriteStats(filepath string) error
-	Clean() error
 }
