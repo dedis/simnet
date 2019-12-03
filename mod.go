@@ -10,34 +10,36 @@ type Simulation struct {
 	round  engine.Round
 }
 
-// NewSimulation creates a new simulation that can be deployed on Kubernetes.
-func NewSimulation(cfg string, r engine.Round, opts ...engine.Option) (*Simulation, error) {
-	engine, err := engine.NewKubernetesEngine(cfg, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Simulation{engine: engine, round: r}, nil
+// NewSimulation creates a new simulation from the engine and the round.
+func NewSimulation(r engine.Round, e engine.SimulationEngine) *Simulation {
+	return &Simulation{engine: e, round: r}
 }
 
 // Run uses the round interface to run the simulation.
-func (sim *Simulation) Run() error {
-	err := sim.engine.Deploy()
+func (sim *Simulation) Run() (err error) {
+	err = sim.engine.Deploy()
 	if err != nil {
-		return err
+		return
 	}
 
-	defer sim.engine.Clean()
+	defer func() {
+		errClean := sim.engine.Clean()
+		if errClean != nil {
+			err = errClean
+		}
+	}()
 
 	err = sim.engine.Execute(sim.round)
 	if err != nil {
-		return err
+		return
 	}
 
 	err = sim.engine.WriteStats("result.json")
 	if err != nil {
-		return err
+		return
 	}
 
-	return nil
+	// Error is populated by the cleaning at the end if any error happens during
+	// the procedure.
+	return
 }

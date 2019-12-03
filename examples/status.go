@@ -15,6 +15,7 @@ import (
 	"go.dedis.ch/onet/v3/network"
 	"go.dedis.ch/simnet"
 	"go.dedis.ch/simnet/engine"
+	"go.dedis.ch/simnet/engine/kubernetes"
 )
 
 // StatusSimulationRound contacts each node of the simulation network and asks
@@ -23,7 +24,7 @@ type StatusSimulationRound struct{}
 
 // Execute will contact each known node and ask for its status.
 func (r StatusSimulationRound) Execute(ctx context.Context, tun engine.Tunnel) {
-	files := ctx.Value(engine.FilesKey("private.toml")).(map[string]interface{})
+	files := ctx.Value(kubernetes.FilesKey("private.toml")).(map[string]interface{})
 	wg := sync.WaitGroup{}
 
 	base := 5000
@@ -33,7 +34,7 @@ func (r StatusSimulationRound) Execute(ctx context.Context, tun engine.Tunnel) {
 		wg.Add(1)
 		go func(ip string, value interface{}) {
 			defer wg.Done()
-			tun.Create(firstPort, ip, func(addr string) {
+			err := tun.Create(firstPort, ip, func(addr string) {
 				si := value.(*network.ServerIdentity)
 				si.Address = network.Address("tls://" + addr)
 
@@ -50,6 +51,10 @@ func (r StatusSimulationRound) Execute(ctx context.Context, tun engine.Tunnel) {
 
 				fmt.Printf("[%s] Status done.\n", ip)
 			})
+
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			}
 		}(ip, value)
 	}
 
@@ -59,9 +64,9 @@ func (r StatusSimulationRound) Execute(ctx context.Context, tun engine.Tunnel) {
 func main() {
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
-	opt := engine.WithFileMapper(
-		engine.FilesKey("private.toml"),
-		engine.FileMapper{
+	opt := kubernetes.WithFileMapper(
+		kubernetes.FilesKey("private.toml"),
+		kubernetes.FileMapper{
 			Path: "/root/.config/conode/private.toml",
 			Mapper: func(r io.Reader) (interface{}, error) {
 				hc := &app.CothorityConfig{}
@@ -80,10 +85,12 @@ func main() {
 		},
 	)
 
-	sim, err := simnet.NewSimulation(kubeconfig, StatusSimulationRound{}, opt)
+	engine, err := kubernetes.NewEngine(kubeconfig, opt)
 	if err != nil {
 		panic(err)
 	}
+
+	sim := simnet.NewSimulation(StatusSimulationRound{}, engine)
 
 	err = sim.Run()
 	if err != nil {

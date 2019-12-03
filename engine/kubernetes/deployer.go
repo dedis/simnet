@@ -1,11 +1,10 @@
-package engine
+package kubernetes
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"time"
 
@@ -14,18 +13,32 @@ import (
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
 )
 
-var (
+const (
 	// RouterBasePort defines what will be the first port used when proxying port-forward
 	// to actual simulation nodes. It is then incremented by 1.
 	RouterBasePort = 6000
 
+	// LabelApp is the shared label between the simnet components.
+	LabelApp = "go.dedis.ch.app"
+	// AppName is the value of the shared label.
+	AppName = "simnet"
+
+	// LabelID is the label for each type of component.
+	LabelID = "go.dedis.ch.id"
+	// AppID is the value of the component label for the simulation application.
+	AppID = "simnet-app"
+	// RouterID is the value of the component label for the router.
+	RouterID = "simnet-router"
+)
+
+var (
 	// DeamonRequestMemory is the amount of memory for monitoring containers.
 	DeamonRequestMemory = resource.MustParse("8Mi")
 	// DeamonRequestCPU is the number of CPU for monitoring containers.
@@ -50,279 +63,137 @@ var (
 	AppLimitCPU = resource.MustParse("200m")
 )
 
-type portTuple struct {
-	pod    int32
-	router int32
+type deployer interface {
+	CreateDeployment() (watch.Interface, error)
+	WaitDeployment(watch.Interface, time.Duration) error
+	FetchPods() ([]apiv1.Pod, error)
+	DeployRouter([]apiv1.Pod) (watch.Interface, error)
+	WaitRouter(watch.Interface) error
+	FetchRouter() (apiv1.Pod, error)
+	DeleteAll() (watch.Interface, error)
+	WaitDeletion(watch.Interface, time.Duration) error
+	ReadFromPod(string, string, string) (io.Reader, error)
+	MakeTunnel() Tunnel
 }
 
-type routerMapping map[string][]portTuple
+type kubeDeployer struct {
+	nodes           []string
+	namespace       string
+	config          *rest.Config
+	client          kubernetes.Interface
+	restclient      rest.Interface
+	executorFactory func(*rest.Config, string, *url.URL) (remotecommand.Executor, error)
 
-// KubernetesEngine is a simulation engine that will deploy simulation nodes on Kubernetes.
-type KubernetesEngine struct {
-	nodes       []string
-	namespace   string
-	config      *rest.Config
-	clientset   *kubernetes.Clientset
-	options     *Options
-	pods        []apiv1.Pod
-	router      apiv1.Pod
-	mapping     routerMapping
-	executeTime time.Time
-	doneTime    time.Time
+	router  apiv1.Pod
+	mapping routerMapping
+	pods    []apiv1.Pod
 }
 
-// NewKubernetesEngine creates a new simulation engine.
-func NewKubernetesEngine(cfg string, opts ...Option) (*KubernetesEngine, error) {
-	config, err := clientcmd.BuildConfigFromFlags("", cfg)
-	if err != nil {
-		return nil, fmt.Errorf("config: %v", err)
-	}
-
+func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeDeployer, error) {
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("client: %v", err)
 	}
 
-	nodes := make([]string, 5)
-	for i := range nodes {
-		nodes[i] = fmt.Sprintf("node%d", i)
-	}
-
-	return &KubernetesEngine{
-		nodes:     nodes,
-		config:    config,
-		clientset: client,
-		namespace: "default",
-		mapping:   make(routerMapping),
-		options:   NewOptions(opts),
+	return &kubeDeployer{
+		nodes:           nodes,
+		namespace:       ns,
+		config:          config,
+		client:          client,
+		restclient:      client.CoreV1().RESTClient(),
+		executorFactory: remotecommand.NewSPDYExecutor,
 	}, nil
 }
 
-// Deploy will create a deployment on the Kubernetes cluster. A pod will then
-// be assigned to simulation nodes.
-func (e *KubernetesEngine) Deploy() error {
+func (kd kubeDeployer) CreateDeployment() (watch.Interface, error) {
 	fmt.Print("Creating deployment...")
-	d := e.clientset.AppsV1().Deployments(e.namespace)
+
+	intf := kd.client.AppsV1().Deployments(kd.namespace)
+
+	opts := metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", LabelID, AppID),
+	}
 
 	// Watch for the deployment status so that it can wait for all the containers
 	// to have started.
-	w, err := d.Watch(metav1.ListOptions{})
+	w, err := intf.Watch(opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	defer w.Stop()
-
-	for _, node := range e.nodes {
+	for _, node := range kd.nodes {
 		deployment := makeDeployment(node)
 
-		_, err = d.Create(deployment)
+		_, err = intf.Create(deployment)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	fmt.Println(" ok")
+	fmt.Println(goterm.ResetLine("Creating deployment... ok"))
 
-	fmt.Print("Wait deployment...")
-	timeout := time.After(300 * time.Second)
+	return w, nil
+}
+
+func (kd *kubeDeployer) WaitDeployment(w watch.Interface, timeout time.Duration) error {
+	fmt.Print("Waiting deployment...")
 	readyMap := make(map[string]struct{})
-	routerDone := false
+	tick := time.After(timeout)
 
 	for {
 		select {
-		case <-timeout:
-			fmt.Println(goterm.ResetLine("Wait deployment... failed"))
-			return errors.New("timeout during deployment")
+		case <-tick:
+			fmt.Println(goterm.ResetLine("Waiting deployment... failed"))
+			return errors.New("timeout")
 		case evt := <-w.ResultChan():
 			dpl := evt.Object.(*appsv1.Deployment)
 
-			for _, cond := range dpl.Status.Conditions {
-				if cond.Type == appsv1.DeploymentAvailable && cond.Status == apiv1.ConditionTrue {
-					readyMap[dpl.Name] = struct{}{}
-				} else if cond.Type == appsv1.DeploymentProgressing && cond.Status == apiv1.ConditionTrue {
-					// If the condition Available is not true, the Progressing message is shown.
-					fmt.Print(goterm.ResetLine(fmt.Sprintf("Wait deployment... %s", cond.Message)))
-				}
-
-				if len(readyMap) == len(e.nodes) && !routerDone {
-					routerDone = true
-
-					fmt.Printf(goterm.ResetLine("Wait deployment... fetching the pods"))
-					err = e.fetchPods()
-					if err != nil {
-						return err
-					}
-
-					err = e.deployRouter()
-					if err != nil {
-						return err
-					}
-
-					// Now wait for the router deployment..
-				} else if len(readyMap) == len(e.nodes)+1 {
-					err = e.fetchRouter()
-					if err != nil {
-						return err
-					}
-
-					fmt.Println(goterm.ResetLine("Wait deployment... ok"))
-					return nil
-				}
-			}
-		}
-	}
-}
-
-func (e *KubernetesEngine) makeContext() (context.Context, error) {
-	ctx := context.Background()
-
-	for key, fm := range e.options.files {
-		files := make(map[string]interface{})
-
-		for _, pod := range e.pods {
-			reader, err := e.readFromPod(pod.Name, "app", fm.Path)
-			if err != nil {
-				return nil, err
+			if dpl.Status.AvailableReplicas > 0 {
+				readyMap[dpl.Name] = struct{}{}
 			}
 
-			files[pod.Status.PodIP], err = fm.Mapper(reader)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		ctx = context.WithValue(ctx, key, files)
-	}
-
-	return ctx, nil
-}
-
-// Execute uses the round implementation to execute a simulation round.
-func (e *KubernetesEngine) Execute(round Round) error {
-	ctx, err := e.makeContext()
-	if err != nil {
-		return err
-	}
-
-	e.executeTime = time.Now()
-
-	round.Execute(ctx, KubernetesTunnel{
-		config:    e.config,
-		namespace: e.namespace,
-		router:    e.router,
-		mapping:   e.mapping,
-		pods:      e.pods,
-	})
-
-	e.doneTime = time.Now()
-
-	return nil
-}
-
-// WriteStats fetches the stats of the nodes then write them into a JSON
-// formatted file.
-func (e *KubernetesEngine) WriteStats(filepath string) error {
-	stats := Stats{
-		Timestamp: e.executeTime.Unix(),
-		Nodes:     make(map[string]NodeStats),
-	}
-
-	f, err := os.Create(filepath)
-	if err != nil {
-		return err
-	}
-
-	for _, pod := range e.pods {
-		reader, err := e.readFromPod(pod.Name, "monitor", "/root/data")
-		if err != nil {
-			return err
-		}
-
-		stats.Nodes[pod.Name] = NewNodeStats(reader)
-	}
-
-	enc := json.NewEncoder(f)
-	err = enc.Encode(&stats)
-	if err != nil {
-		return err
-	}
-
-	err = f.Close()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// Clean removes any resource created for the simulation.
-func (e *KubernetesEngine) Clean() error {
-	fmt.Println("Deleting deployment...")
-	deletePolicy := metav1.DeletePropagationForeground
-	deleteOptions := &metav1.DeleteOptions{
-		PropagationPolicy: &deletePolicy,
-	}
-
-	d := e.clientset.AppsV1().Deployments(e.namespace)
-	w, err := d.Watch(metav1.ListOptions{})
-	if err != nil {
-		return err
-	}
-
-	defer w.Stop()
-
-	for _, node := range e.nodes {
-		err = d.Delete("simnet-"+node, deleteOptions)
-		if err != nil {
-			return err
-		}
-	}
-
-	err = d.Delete("simnet-router", deleteOptions)
-	if err != nil {
-		return err
-	}
-
-	timeout := time.After(30 * time.Second)
-	countDeleted := 0
-
-	for {
-		select {
-		case <-timeout:
-			return errors.New("timeout during deletion")
-		case evt := <-w.ResultChan():
-			dpl := evt.Object.(*appsv1.Deployment)
-			if dpl.Status.AvailableReplicas == 0 && dpl.Status.UnavailableReplicas == 0 {
-				countDeleted++
-			}
-
-			if countDeleted >= len(e.nodes)+1 {
-				// No more replicas so the deployment is deleted.
+			if len(readyMap) == len(kd.nodes) {
+				fmt.Println(goterm.ResetLine("Waiting deployment... ok"))
 				return nil
 			}
 		}
 	}
 }
 
-func (e *KubernetesEngine) fetchPods() error {
-	pods, err := e.clientset.CoreV1().
-		Pods(e.namespace).
-		List(metav1.ListOptions{LabelSelector: "app=simnet"})
+func (kd *kubeDeployer) FetchPods() ([]apiv1.Pod, error) {
+	fmt.Printf("Fetching pods...")
+
+	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", LabelID, AppID),
+	})
+
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	e.pods = pods.Items
-	return nil
+	if len(pods.Items) != len(kd.nodes) {
+		return nil, fmt.Errorf("invalid number of pods: %d vs %d", len(pods.Items), len(kd.nodes))
+	}
+
+	fmt.Println(goterm.ResetLine("Fetching pods... ok"))
+	kd.pods = pods.Items
+	return pods.Items, nil
 }
 
-func (e *KubernetesEngine) deployRouter() error {
-	d := e.clientset.AppsV1().Deployments(e.namespace)
+func (kd *kubeDeployer) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
+	fmt.Printf("Deploying the router...")
+
+	intf := kd.client.AppsV1().Deployments(kd.namespace)
+
+	w, err := intf.Watch(metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", LabelID, RouterID)})
+	if err != nil {
+		return nil, err
+	}
 
 	base := int32(RouterBasePort)
+	mapping := make(map[string][]portTuple)
 
-	for _, pod := range e.pods {
+	for _, pod := range pods {
 		ports := make([]portTuple, 0)
 
 		// expect the first container to be the application.
@@ -331,40 +202,109 @@ func (e *KubernetesEngine) deployRouter() error {
 			base++
 		}
 
-		e.mapping[pod.Status.PodIP] = ports
+		mapping[pod.Status.PodIP] = ports
 	}
 
 	// Deploy the router that will redirect port forward tunnels to each pod.
-	_, err := d.Create(e.makeRouterDeployment())
+	_, err = intf.Create(makeRouterDeployment(mapping))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	fmt.Println(goterm.ResetLine("Deploying the router... ok"))
+	kd.mapping = mapping
+	return w, nil
 }
 
-func (e *KubernetesEngine) fetchRouter() error {
-	pods, err := e.clientset.CoreV1().
-		Pods(e.namespace).
-		List(metav1.ListOptions{LabelSelector: "app=simnet-router"})
+func (kd *kubeDeployer) WaitRouter(w watch.Interface) error {
+	fmt.Printf("Waiting for the router...")
+	for {
+		select {
+		// TODO: timeout
+		case evt := <-w.ResultChan():
+			dpl := evt.Object.(*appsv1.Deployment)
+			if dpl.Status.AvailableReplicas > 0 {
+				fmt.Println(goterm.ResetLine("Waiting for the router... ok"))
+				return nil
+			}
+		}
+	}
+}
+
+func (kd *kubeDeployer) FetchRouter() (apiv1.Pod, error) {
+	fmt.Printf("Fetching the router...")
+
+	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", LabelID, RouterID),
+	})
 	if err != nil {
-		return err
+		return apiv1.Pod{}, err
 	}
 
 	if len(pods.Items) != 1 {
-		return errors.New("invalid number of pods")
+		return apiv1.Pod{}, errors.New("invalid number of pods")
 	}
 
-	e.router = pods.Items[0]
-	return nil
+	fmt.Println(goterm.ResetLine("Fetching the router... ok"))
+	kd.router = pods.Items[0]
+	return pods.Items[0], nil
 }
 
-func (e *KubernetesEngine) readFromPod(podName string, containerName string, srcPath string) (io.Reader, error) {
+func (kd *kubeDeployer) DeleteAll() (watch.Interface, error) {
+	fmt.Println("Deleting deployment...")
+
+	deletePolicy := metav1.DeletePropagationForeground
+	deleteOptions := &metav1.DeleteOptions{
+		PropagationPolicy: &deletePolicy,
+	}
+
+	selector := metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", LabelApp, AppName),
+	}
+
+	intf := kd.client.AppsV1().Deployments(kd.namespace)
+	w, err := intf.Watch(selector)
+	if err != nil {
+		return nil, err
+	}
+
+	err = intf.DeleteCollection(deleteOptions, selector)
+	if err != nil {
+		w.Stop()
+		return nil, err
+	}
+
+	return w, nil
+}
+
+func (kd *kubeDeployer) WaitDeletion(w watch.Interface, timeout time.Duration) error {
+	tick := time.After(timeout)
+	countDeleted := 0
+
+	for {
+		select {
+		case <-tick:
+			return errors.New("timeout")
+		case evt := <-w.ResultChan():
+			dpl := evt.Object.(*appsv1.Deployment)
+			if dpl.Status.AvailableReplicas == 0 && dpl.Status.UnavailableReplicas == 0 {
+				countDeleted++
+			}
+
+			if countDeleted >= len(kd.nodes)+1 {
+				// No more replicas so the deployment is deleted.
+				return nil
+			}
+		}
+	}
+}
+
+func (kd *kubeDeployer) ReadFromPod(podName string, containerName string, srcPath string) (io.Reader, error) {
 	reader, outStream := io.Pipe()
 
-	req := e.clientset.CoreV1().RESTClient().
+	req := kd.restclient.
 		Get().
-		Namespace(e.namespace).
+		Namespace(kd.namespace).
 		Resource("pods").
 		Name(podName).
 		SubResource("exec").
@@ -377,7 +317,7 @@ func (e *KubernetesEngine) readFromPod(podName string, containerName string, src
 			TTY:       false,
 		}, scheme.ParameterCodec)
 
-	exec, err := remotecommand.NewSPDYExecutor(e.config, "POST", req.URL())
+	exec, err := kd.executorFactory(kd.config, "POST", req.URL())
 	if err != nil {
 		return nil, err
 	}
@@ -390,12 +330,17 @@ func (e *KubernetesEngine) readFromPod(podName string, containerName string, src
 			Stderr: os.Stderr,
 			Tty:    false,
 		})
+
 		if err != nil {
-			fmt.Printf("Stream error: %v\n", err)
+			reader.CloseWithError(err)
 		}
 	}()
 
 	return reader, nil
+}
+
+func (kd *kubeDeployer) MakeTunnel() Tunnel {
+	return newTunnel(kd)
 }
 
 func int32Ptr(v int32) *int32 {
@@ -403,26 +348,24 @@ func int32Ptr(v int32) *int32 {
 }
 
 func makeDeployment(node string) *appsv1.Deployment {
+	labels := map[string]string{
+		LabelApp: AppName,
+		LabelID:  AppID,
+	}
+
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "simnet-" + node,
-			Labels: map[string]string{
-				"app": "simnet",
-			},
+			Name:   "simnet-" + node,
+			Labels: labels,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: int32Ptr(1),
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"name": "simnet-" + node,
-				},
+				MatchLabels: labels,
 			},
 			Template: apiv1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app":  "simnet",
-						"name": "simnet-" + node,
-					},
+					Labels: labels,
 				},
 				Spec: apiv1.PodSpec{
 					Containers: []apiv1.Container{
@@ -527,10 +470,10 @@ func makeDeployment(node string) *appsv1.Deployment {
 	}
 }
 
-func (e *KubernetesEngine) makeRouterDeployment() *appsv1.Deployment {
+func makeRouterDeployment(mapping map[string][]portTuple) *appsv1.Deployment {
 	containerPorts := make([]apiv1.ContainerPort, 0)
 	args := []string{}
-	for ip, tuples := range e.mapping {
+	for ip, tuples := range mapping {
 		for _, t := range tuples {
 			containerPorts = append(containerPorts, apiv1.ContainerPort{
 				Protocol:      apiv1.ProtocolTCP,
@@ -541,25 +484,24 @@ func (e *KubernetesEngine) makeRouterDeployment() *appsv1.Deployment {
 		}
 	}
 
+	labels := map[string]string{
+		LabelApp: AppName,
+		LabelID:  RouterID,
+	}
+
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "simnet-router",
-			Labels: map[string]string{
-				"app": "simnet",
-			},
+			Name:   "simnet-router",
+			Labels: labels,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: int32Ptr(1),
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": "simnet-router",
-				},
+				MatchLabels: labels,
 			},
 			Template: apiv1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": "simnet-router",
-					},
+					Labels: labels,
 				},
 				Spec: apiv1.PodSpec{
 					Containers: []apiv1.Container{

@@ -13,6 +13,7 @@ require (
 	github.com/googleapis/gnostic v0.3.1 // indirect
 	github.com/imdario/mergo v0.3.8 // indirect
 	github.com/opencontainers/go-digest v1.0.0-rc1 // indirect
+	github.com/stretchr/testify v1.4.0
 	go.dedis.ch/cothority/v3 v3.1.0
 	go.dedis.ch/onet/v3 v3.0.29
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c // indirect
