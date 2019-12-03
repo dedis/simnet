@@ -34,9 +34,9 @@ users:
 - name: minikube
 `
 
-func TestKubernetesEngine_New(t *testing.T) {
+func TestStrategy_New(t *testing.T) {
 	// It should fail as the file does not exist
-	_, err := NewEngine("abc")
+	_, err := NewStrategy("abc")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "config: ")
 
@@ -49,15 +49,15 @@ func TestKubernetesEngine_New(t *testing.T) {
 	_, err = f.Write([]byte(testConfig))
 	require.NoError(t, err)
 
-	sim, err := NewEngine(f.Name())
+	sim, err := NewStrategy(f.Name())
 	require.NoError(t, err)
 	require.NotNil(t, sim)
 }
 
 func TestStrategy_DeployWithFailures(t *testing.T) {
-	deployer := &testDeployer{}
-	stry := &Engine{
-		deployer: deployer,
+	deployer := &testEngine{}
+	stry := &Strategy{
+		engine: deployer,
 	}
 
 	err := stry.Deploy()
@@ -105,13 +105,13 @@ func TestStrategy_Execute(t *testing.T) {
 		}),
 	}
 
-	stry := &Engine{
+	stry := &Strategy{
 		pods: []apiv1.Pod{
 			{ObjectMeta: metav1.ObjectMeta{Name: "a"}, Status: apiv1.PodStatus{PodIP: "a.a.a.a"}},
 			{ObjectMeta: metav1.ObjectMeta{Name: "b"}, Status: apiv1.PodStatus{PodIP: "b.b.b.b"}},
 		},
-		deployer: &testDeployer{},
-		options:  NewOptions(options),
+		engine:  &testEngine{},
+		options: NewOptions(options),
 	}
 
 	done := make(chan struct{}, 1)
@@ -146,26 +146,26 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 		}),
 	}
 
-	stry := &Engine{
-		pods:     []apiv1.Pod{{}},
-		deployer: &testDeployer{errReadFromPod: e},
-		options:  NewOptions(options),
+	stry := &Strategy{
+		pods:    []apiv1.Pod{{}},
+		engine:  &testEngine{errReadFromPod: e},
+		options: NewOptions(options),
 	}
 
 	err := stry.Execute(testRound{})
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
-	stry.deployer = &testDeployer{}
+	stry.engine = &testEngine{}
 	err = stry.Execute(testRound{})
 	require.Error(t, err)
 	require.Equal(t, e2, err)
 }
 
 func TestStrategy_WriteStats(t *testing.T) {
-	stry := &Engine{
-		pods:     []apiv1.Pod{{}},
-		deployer: &testDeployer{},
+	stry := &Strategy{
+		pods:   []apiv1.Pod{{}},
+		engine: &testEngine{},
 	}
 
 	// Get a temporary file path.
@@ -183,27 +183,27 @@ func TestStrategy_WriteStats(t *testing.T) {
 }
 
 func TestStrategy_CleanWithFailure(t *testing.T) {
-	stry := &Engine{
-		deployer: &testDeployer{},
+	stry := &Strategy{
+		engine: &testEngine{},
 	}
 
 	err := stry.Clean()
 	require.NoError(t, err)
 
 	e := errors.New("delete all error")
-	stry.deployer = &testDeployer{errDeleteAll: e}
+	stry.engine = &testEngine{errDeleteAll: e}
 	err = stry.Clean()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
 	e = errors.New("delete wait error")
-	stry.deployer = &testDeployer{errWaitDeletion: e}
+	stry.engine = &testEngine{errWaitDeletion: e}
 	err = stry.Clean()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }
 
-type testDeployer struct {
+type testEngine struct {
 	errDeployment     error
 	errWaitDeployment error
 	errFetchPods      error
@@ -215,43 +215,43 @@ type testDeployer struct {
 	errReadFromPod    error
 }
 
-func (td *testDeployer) CreateDeployment() (watch.Interface, error) {
-	return watch.NewFake(), td.errDeployment
+func (te *testEngine) CreateDeployment() (watch.Interface, error) {
+	return watch.NewFake(), te.errDeployment
 }
 
-func (td *testDeployer) WaitDeployment(watch.Interface, time.Duration) error {
-	return td.errWaitDeployment
+func (te *testEngine) WaitDeployment(watch.Interface, time.Duration) error {
+	return te.errWaitDeployment
 }
 
-func (td *testDeployer) FetchPods() ([]apiv1.Pod, error) {
-	return nil, td.errFetchPods
+func (te *testEngine) FetchPods() ([]apiv1.Pod, error) {
+	return nil, te.errFetchPods
 }
 
-func (td *testDeployer) DeployRouter([]apiv1.Pod) (watch.Interface, error) {
-	return watch.NewFake(), td.errDeployRouter
+func (te *testEngine) DeployRouter([]apiv1.Pod) (watch.Interface, error) {
+	return watch.NewFake(), te.errDeployRouter
 }
 
-func (td *testDeployer) WaitRouter(watch.Interface) error {
-	return td.errWaitRouter
+func (te *testEngine) WaitRouter(watch.Interface) error {
+	return te.errWaitRouter
 }
 
-func (td *testDeployer) FetchRouter() (apiv1.Pod, error) {
-	return apiv1.Pod{}, td.errFetchRouter
+func (te *testEngine) FetchRouter() (apiv1.Pod, error) {
+	return apiv1.Pod{}, te.errFetchRouter
 }
 
-func (td *testDeployer) DeleteAll() (watch.Interface, error) {
-	return watch.NewFake(), td.errDeleteAll
+func (te *testEngine) DeleteAll() (watch.Interface, error) {
+	return watch.NewFake(), te.errDeleteAll
 }
 
-func (td *testDeployer) WaitDeletion(watch.Interface, time.Duration) error {
-	return td.errWaitDeletion
+func (te *testEngine) WaitDeletion(watch.Interface, time.Duration) error {
+	return te.errWaitDeletion
 }
 
-func (td *testDeployer) ReadFromPod(string, string, string) (io.Reader, error) {
-	return bytes.NewReader([]byte{}), td.errReadFromPod
+func (te *testEngine) ReadFromPod(string, string, string) (io.Reader, error) {
+	return bytes.NewReader([]byte{}), te.errReadFromPod
 }
 
-func (td *testDeployer) MakeTunnel() Tunnel {
+func (te *testEngine) MakeTunnel() Tunnel {
 	return Tunnel{}
 }
 

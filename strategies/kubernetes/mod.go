@@ -54,9 +54,9 @@ func WithFileMapper(key FilesKey, fm FileMapper) Option {
 	}
 }
 
-// Engine is a simulation engine that will deploy simulation nodes on Kubernetes.
-type Engine struct {
-	deployer    deployer
+// Strategy is a simulation strategy that will deploy simulation nodes on Kubernetes.
+type Strategy struct {
+	engine      engine
 	namespace   string
 	options     *Options
 	pods        []apiv1.Pod
@@ -64,8 +64,8 @@ type Engine struct {
 	doneTime    time.Time
 }
 
-// NewEngine creates a new simulation engine.
-func NewEngine(cfg string, opts ...Option) (*Engine, error) {
+// NewStrategy creates a new simulation engine.
+func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 	config, err := clientcmd.BuildConfigFromFlags("", cfg)
 	if err != nil {
 		return nil, fmt.Errorf("config: %v", err)
@@ -81,8 +81,8 @@ func NewEngine(cfg string, opts ...Option) (*Engine, error) {
 		return nil, err
 	}
 
-	return &Engine{
-		deployer:  deployer,
+	return &Strategy{
+		engine:    deployer,
 		namespace: "default",
 		options:   NewOptions(opts),
 	}, nil
@@ -90,37 +90,37 @@ func NewEngine(cfg string, opts ...Option) (*Engine, error) {
 
 // Deploy will create a deployment on the Kubernetes cluster. A pod will then
 // be assigned to simulation nodes.
-func (e *Engine) Deploy() error {
-	w, err := e.deployer.CreateDeployment()
+func (s *Strategy) Deploy() error {
+	w, err := s.engine.CreateDeployment()
 	if err != nil {
 		return err
 	}
 
-	err = e.deployer.WaitDeployment(w, 300*time.Second)
+	err = s.engine.WaitDeployment(w, 300*time.Second)
 	w.Stop()
 	if err != nil {
 		return err
 	}
 
-	pods, err := e.deployer.FetchPods()
+	pods, err := s.engine.FetchPods()
 	if err != nil {
 		return err
 	}
 
-	e.pods = pods
+	s.pods = pods
 
-	w, err = e.deployer.DeployRouter(pods)
+	w, err = s.engine.DeployRouter(pods)
 	if err != nil {
 		return err
 	}
 
-	err = e.deployer.WaitRouter(w)
+	err = s.engine.WaitRouter(w)
 	w.Stop()
 	if err != nil {
 		return err
 	}
 
-	_, err = e.deployer.FetchRouter()
+	_, err = s.engine.FetchRouter()
 	if err != nil {
 		return err
 	}
@@ -128,14 +128,14 @@ func (e *Engine) Deploy() error {
 	return nil
 }
 
-func (e *Engine) makeContext() (context.Context, error) {
+func (s *Strategy) makeContext() (context.Context, error) {
 	ctx := context.Background()
 
-	for key, fm := range e.options.files {
+	for key, fm := range s.options.files {
 		files := make(map[string]interface{})
 
-		for _, pod := range e.pods {
-			reader, err := e.deployer.ReadFromPod(pod.Name, "app", fm.Path)
+		for _, pod := range s.pods {
+			reader, err := s.engine.ReadFromPod(pod.Name, "app", fm.Path)
 			if err != nil {
 				return nil, err
 			}
@@ -153,31 +153,31 @@ func (e *Engine) makeContext() (context.Context, error) {
 }
 
 // Execute uses the round implementation to execute a simulation round.
-func (e *Engine) Execute(round strategies.Round) error {
-	ctx, err := e.makeContext()
+func (s *Strategy) Execute(round strategies.Round) error {
+	ctx, err := s.makeContext()
 	if err != nil {
 		return err
 	}
 
-	e.executeTime = time.Now()
+	s.executeTime = time.Now()
 
-	round.Execute(ctx, e.deployer.MakeTunnel())
+	round.Execute(ctx, s.engine.MakeTunnel())
 
-	e.doneTime = time.Now()
+	s.doneTime = time.Now()
 
 	return nil
 }
 
 // WriteStats fetches the stats of the nodes then write them into a JSON
 // formatted file.
-func (e *Engine) WriteStats(filepath string) error {
+func (s *Strategy) WriteStats(filepath string) error {
 	stats := strategies.Stats{
-		Timestamp: e.executeTime.Unix(),
+		Timestamp: s.executeTime.Unix(),
 		Nodes:     make(map[string]strategies.NodeStats),
 	}
 
-	for _, pod := range e.pods {
-		reader, err := e.deployer.ReadFromPod(pod.Name, "monitor", "/root/data")
+	for _, pod := range s.pods {
+		reader, err := s.engine.ReadFromPod(pod.Name, "monitor", "/root/data")
 		if err != nil {
 			return err
 		}
@@ -205,15 +205,15 @@ func (e *Engine) WriteStats(filepath string) error {
 }
 
 // Clean removes any resource created for the simulation.
-func (e *Engine) Clean() error {
-	w, err := e.deployer.DeleteAll()
+func (s *Strategy) Clean() error {
+	w, err := s.engine.DeleteAll()
 	if err != nil {
 		return err
 	}
 
 	defer w.Stop()
 
-	err = e.deployer.WaitDeletion(w, 60*time.Second)
+	err = s.engine.WaitDeletion(w, 60*time.Second)
 	if err != nil {
 		return err
 	}

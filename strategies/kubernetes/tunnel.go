@@ -41,12 +41,12 @@ func makeForwarder(dialer httpstream.Dialer, ports []string, stopChan, readyChan
 // Tunnel provides the primitive to open tunnels between the host
 // and simulation nodes running inside a cluster.
 type Tunnel struct {
-	engine              *kubeDeployer
+	engine              *kubeEngine
 	roundTripperFactory func(*rest.Config) (http.RoundTripper, spdy.Upgrader, error)
 	forwarderFactory    func(httpstream.Dialer, []string, chan struct{}, chan struct{}) (Forwarder, error)
 }
 
-func newTunnel(e *kubeDeployer) Tunnel {
+func newTunnel(e *kubeEngine) Tunnel {
 	return Tunnel{
 		engine:              e,
 		roundTripperFactory: spdy.RoundTripperFor,

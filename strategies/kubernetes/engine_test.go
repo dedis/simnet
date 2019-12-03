@@ -26,9 +26,9 @@ const testTimeout = 500 * time.Millisecond
 
 func TestEngine_CreateDeployments(t *testing.T) {
 	n := 3
-	deployer, client := makeDeployer(n)
+	engine, client := makeEngine(n)
 
-	w, err := deployer.CreateDeployment()
+	w, err := engine.CreateDeployment()
 	require.NoError(t, err)
 	defer w.Stop()
 
@@ -56,14 +56,14 @@ func TestEngine_CreateDeployments(t *testing.T) {
 
 func TestEngine_CreateDeploymentFailure(t *testing.T) {
 	n := 3
-	deployer, client := makeDeployer(n)
+	engine, client := makeEngine(n)
 
 	// First test that the error on creation is handled.
 	e := errors.New("create error")
 	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
 		return true, nil, e
 	})
-	_, err := deployer.CreateDeployment()
+	_, err := engine.CreateDeployment()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
@@ -72,14 +72,14 @@ func TestEngine_CreateDeploymentFailure(t *testing.T) {
 	e = errors.New("watcher error")
 	client.PrependWatchReactor("*", testcore.DefaultWatchReactor(fw, e))
 
-	_, err = deployer.CreateDeployment()
+	_, err = engine.CreateDeployment()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }
 
 func TestEngine_WaitDeployment(t *testing.T) {
 	n := 3
-	deployer, _ := makeDeployer(n)
+	engine, _ := makeEngine(n)
 
 	w := watch.NewFakeWithChanSize(n, false)
 
@@ -94,14 +94,14 @@ func TestEngine_WaitDeployment(t *testing.T) {
 		})
 	}
 
-	require.NoError(t, deployer.WaitDeployment(w, testTimeout))
+	require.NoError(t, engine.WaitDeployment(w, testTimeout))
 }
 
 func TestEngine_WaitDeploymentFailure(t *testing.T) {
-	deployer, _ := makeDeployer(0)
+	engine, _ := makeEngine(0)
 
 	w := watch.NewFake()
-	err := deployer.WaitDeployment(w, time.Millisecond)
+	err := engine.WaitDeployment(w, time.Millisecond)
 	require.Error(t, err)
 	require.Equal(t, "timeout", err.Error())
 }
@@ -120,29 +120,29 @@ func TestEngine_FetchPods(t *testing.T) {
 			},
 		},
 	}
-	deployer := newKubeDeployerTest(fake.NewSimpleClientset(list), "", []string{"a"})
+	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", []string{"a"})
 
-	pods, err := deployer.FetchPods()
+	pods, err := engine.FetchPods()
 	require.NoError(t, err)
 	require.Equal(t, 1, len(pods))
-	require.Equal(t, 1, len(deployer.pods))
+	require.Equal(t, 1, len(engine.pods))
 }
 
 func TestEngine_FetchPodsFailure(t *testing.T) {
-	deployer, client := makeDeployer(0)
+	engine, client := makeEngine(0)
 
 	e := errors.New("list error")
 	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
 		return true, nil, e
 	})
 
-	_, err := deployer.FetchPods()
+	_, err := engine.FetchPods()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }
 
 func TestEngine_DeployRouter(t *testing.T) {
-	deployer, _ := makeDeployer(3)
+	engine, _ := makeEngine(3)
 
 	pods := []apiv1.Pod{
 		{
@@ -160,7 +160,7 @@ func TestEngine_DeployRouter(t *testing.T) {
 		},
 	}
 
-	w, err := deployer.DeployRouter(pods)
+	w, err := engine.DeployRouter(pods)
 	require.NoError(t, err)
 	w.Stop()
 
@@ -172,14 +172,14 @@ func TestEngine_DeployRouter(t *testing.T) {
 }
 
 func TestEngine_DeployRouterFailure(t *testing.T) {
-	deployer, client := makeDeployer(0)
+	engine, client := makeEngine(0)
 
 	e := errors.New("create error")
 	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
 		return true, nil, e
 	})
 
-	_, err := deployer.DeployRouter([]apiv1.Pod{})
+	_, err := engine.DeployRouter([]apiv1.Pod{})
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
@@ -187,13 +187,13 @@ func TestEngine_DeployRouterFailure(t *testing.T) {
 	e = errors.New("watcher error")
 	client.PrependWatchReactor("*", testcore.DefaultWatchReactor(fw, e))
 
-	_, err = deployer.DeployRouter([]apiv1.Pod{})
+	_, err = engine.DeployRouter([]apiv1.Pod{})
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }
 
 func TestEngine_WaitRouter(t *testing.T) {
-	deployer := newKubeDeployerTest(fake.NewSimpleClientset(), "", nil)
+	engine := newKubeEngineTest(fake.NewSimpleClientset(), "", nil)
 
 	w := watch.NewFakeWithChanSize(1, false)
 	w.Modify(&appsv1.Deployment{
@@ -202,7 +202,7 @@ func TestEngine_WaitRouter(t *testing.T) {
 		},
 	})
 
-	err := deployer.WaitRouter(w)
+	err := engine.WaitRouter(w)
 	require.NoError(t, err)
 }
 
@@ -220,17 +220,17 @@ func TestEngine_FetchRouter(t *testing.T) {
 			},
 		},
 	}
-	deployer := newKubeDeployerTest(fake.NewSimpleClientset(list), "", nil)
+	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", nil)
 
-	router, err := deployer.FetchRouter()
+	router, err := engine.FetchRouter()
 	require.NoError(t, err)
 	require.Equal(t, "a", router.ObjectMeta.Name)
 }
 
 func TestEngine_FetchRouterFailure(t *testing.T) {
-	deployer, client := makeDeployer(0)
+	engine, client := makeEngine(0)
 
-	_, err := deployer.FetchRouter()
+	_, err := engine.FetchRouter()
 	require.Error(t, err)
 	require.Equal(t, "invalid number of pods", err.Error())
 
@@ -239,7 +239,7 @@ func TestEngine_FetchRouterFailure(t *testing.T) {
 		return true, nil, e
 	})
 
-	_, err = deployer.FetchRouter()
+	_, err = engine.FetchRouter()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }
@@ -254,9 +254,9 @@ func TestEngine_Delete(t *testing.T) {
 		return true, nil, nil
 	})
 
-	deployer := newKubeDeployerTest(client, "", nil)
+	engine := newKubeEngineTest(client, "", nil)
 
-	w, err := deployer.DeleteAll()
+	w, err := engine.DeleteAll()
 	require.NoError(t, err)
 	defer w.Stop()
 
@@ -270,14 +270,14 @@ func TestEngine_Delete(t *testing.T) {
 }
 
 func TestEngine_DeleteFailure(t *testing.T) {
-	deployer, client := makeDeployer(0)
+	engine, client := makeEngine(0)
 
 	e := errors.New("delete error")
 	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
 		return true, nil, e
 	})
 
-	_, err := deployer.DeleteAll()
+	_, err := engine.DeleteAll()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
@@ -285,13 +285,13 @@ func TestEngine_DeleteFailure(t *testing.T) {
 	e = errors.New("watcher error")
 	client.PrependWatchReactor("*", testcore.DefaultWatchReactor(fw, e))
 
-	_, err = deployer.DeleteAll()
+	_, err = engine.DeleteAll()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }
 
 func TestEngine_WaitDeletion(t *testing.T) {
-	deployer, _ := makeDeployer(0)
+	engine, _ := makeEngine(0)
 
 	w := watch.NewFakeWithChanSize(1, false)
 
@@ -302,28 +302,28 @@ func TestEngine_WaitDeletion(t *testing.T) {
 		},
 	})
 
-	err := deployer.WaitDeletion(w, testTimeout)
+	err := engine.WaitDeletion(w, testTimeout)
 	require.NoError(t, err)
 }
 
 func TestEngine_WaitDeletionFailure(t *testing.T) {
-	deployer, _ := makeDeployer(0)
+	engine, _ := makeEngine(0)
 
 	fw := watch.NewFake()
-	err := deployer.WaitDeletion(fw, time.Millisecond)
+	err := engine.WaitDeletion(fw, time.Millisecond)
 	require.Error(t, err)
 	require.Equal(t, "timeout", err.Error())
 }
 
 func TestEngine_ReadPod(t *testing.T) {
-	deployer := kubeDeployer{
+	engine := kubeEngine{
 		client:          fake.NewSimpleClientset(),
 		restclient:      &restfake.RESTClient{},
 		config:          &rest.Config{},
 		executorFactory: testExecutorFactory,
 	}
 
-	reader, err := deployer.ReadFromPod("pod", "container", "this/is/a/file")
+	reader, err := engine.ReadFromPod("pod", "container", "this/is/a/file")
 	require.NoError(t, err)
 
 	data, err := ioutil.ReadAll(reader)
@@ -332,19 +332,19 @@ func TestEngine_ReadPod(t *testing.T) {
 }
 
 func TestEngine_ReadPodFailure(t *testing.T) {
-	deployer := kubeDeployer{
+	engine := kubeEngine{
 		client:          fake.NewSimpleClientset(),
 		restclient:      &restfake.RESTClient{},
 		executorFactory: testExecutorFactory,
 	}
 
-	_, err := deployer.ReadFromPod("", "", "")
+	_, err := engine.ReadFromPod("", "", "")
 	require.Error(t, err)
 	require.Equal(t, "missing config", err.Error())
 
-	deployer.config = &rest.Config{}
-	deployer.executorFactory = testFailingExecutorFactory
-	reader, err := deployer.ReadFromPod("", "", "")
+	engine.config = &rest.Config{}
+	engine.executorFactory = testFailingExecutorFactory
+	reader, err := engine.ReadFromPod("", "", "")
 	require.NoError(t, err)
 
 	_, err = reader.Read(make([]byte, 1))
@@ -353,24 +353,24 @@ func TestEngine_ReadPodFailure(t *testing.T) {
 }
 
 func TestEngine_MakeTunnel(t *testing.T) {
-	deployer := kubeDeployer{
+	engine := kubeEngine{
 		pods: []apiv1.Pod{{}},
 	}
 
-	tun := deployer.MakeTunnel()
+	tun := engine.MakeTunnel()
 	require.NotNil(t, tun)
 	require.Equal(t, 1, len(tun.engine.pods))
 }
 
-func newKubeDeployerTest(client kubernetes.Interface, ns string, nodes []string) *kubeDeployer {
-	return &kubeDeployer{
+func newKubeEngineTest(client kubernetes.Interface, ns string, nodes []string) *kubeEngine {
+	return &kubeEngine{
 		client:    client,
 		namespace: ns,
 		nodes:     nodes,
 	}
 }
 
-func makeDeployer(n int) (*kubeDeployer, *fake.Clientset) {
+func makeEngine(n int) (*kubeEngine, *fake.Clientset) {
 	client := fake.NewSimpleClientset()
 
 	nodes := make([]string, n)
@@ -378,9 +378,9 @@ func makeDeployer(n int) (*kubeDeployer, *fake.Clientset) {
 		nodes[i] = fmt.Sprintf("node%d", i)
 	}
 
-	deployer := newKubeDeployerTest(client, "", nodes)
+	engine := newKubeEngineTest(client, "", nodes)
 
-	return deployer, client
+	return engine, client
 }
 
 type fakeExecutor struct {

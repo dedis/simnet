@@ -85,7 +85,7 @@ func main() {
 		},
 	)
 
-	engine, err := kubernetes.NewEngine(kubeconfig, opt)
+	engine, err := kubernetes.NewStrategy(kubeconfig, opt)
 	if err != nil {
 		panic(err)
 	}

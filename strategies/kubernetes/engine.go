@@ -63,7 +63,7 @@ var (
 	AppLimitCPU = resource.MustParse("200m")
 )
 
-type deployer interface {
+type engine interface {
 	CreateDeployment() (watch.Interface, error)
 	WaitDeployment(watch.Interface, time.Duration) error
 	FetchPods() ([]apiv1.Pod, error)
@@ -76,7 +76,7 @@ type deployer interface {
 	MakeTunnel() Tunnel
 }
 
-type kubeDeployer struct {
+type kubeEngine struct {
 	nodes           []string
 	namespace       string
 	config          *rest.Config
@@ -89,13 +89,13 @@ type kubeDeployer struct {
 	pods    []apiv1.Pod
 }
 
-func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeDeployer, error) {
+func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeEngine, error) {
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("client: %v", err)
 	}
 
-	return &kubeDeployer{
+	return &kubeEngine{
 		nodes:           nodes,
 		namespace:       ns,
 		config:          config,
@@ -105,7 +105,7 @@ func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeDeplo
 	}, nil
 }
 
-func (kd kubeDeployer) CreateDeployment() (watch.Interface, error) {
+func (kd kubeEngine) CreateDeployment() (watch.Interface, error) {
 	fmt.Print("Creating deployment...")
 
 	intf := kd.client.AppsV1().Deployments(kd.namespace)
@@ -135,7 +135,7 @@ func (kd kubeDeployer) CreateDeployment() (watch.Interface, error) {
 	return w, nil
 }
 
-func (kd *kubeDeployer) WaitDeployment(w watch.Interface, timeout time.Duration) error {
+func (kd *kubeEngine) WaitDeployment(w watch.Interface, timeout time.Duration) error {
 	fmt.Print("Waiting deployment...")
 	readyMap := make(map[string]struct{})
 	tick := time.After(timeout)
@@ -160,7 +160,7 @@ func (kd *kubeDeployer) WaitDeployment(w watch.Interface, timeout time.Duration)
 	}
 }
 
-func (kd *kubeDeployer) FetchPods() ([]apiv1.Pod, error) {
+func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 	fmt.Printf("Fetching pods...")
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
@@ -180,7 +180,7 @@ func (kd *kubeDeployer) FetchPods() ([]apiv1.Pod, error) {
 	return pods.Items, nil
 }
 
-func (kd *kubeDeployer) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
+func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
 	fmt.Printf("Deploying the router...")
 
 	intf := kd.client.AppsV1().Deployments(kd.namespace)
@@ -216,7 +216,7 @@ func (kd *kubeDeployer) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) 
 	return w, nil
 }
 
-func (kd *kubeDeployer) WaitRouter(w watch.Interface) error {
+func (kd *kubeEngine) WaitRouter(w watch.Interface) error {
 	fmt.Printf("Waiting for the router...")
 	for {
 		select {
@@ -231,7 +231,7 @@ func (kd *kubeDeployer) WaitRouter(w watch.Interface) error {
 	}
 }
 
-func (kd *kubeDeployer) FetchRouter() (apiv1.Pod, error) {
+func (kd *kubeEngine) FetchRouter() (apiv1.Pod, error) {
 	fmt.Printf("Fetching the router...")
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
@@ -250,7 +250,7 @@ func (kd *kubeDeployer) FetchRouter() (apiv1.Pod, error) {
 	return pods.Items[0], nil
 }
 
-func (kd *kubeDeployer) DeleteAll() (watch.Interface, error) {
+func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
 	fmt.Println("Deleting deployment...")
 
 	deletePolicy := metav1.DeletePropagationForeground
@@ -277,7 +277,7 @@ func (kd *kubeDeployer) DeleteAll() (watch.Interface, error) {
 	return w, nil
 }
 
-func (kd *kubeDeployer) WaitDeletion(w watch.Interface, timeout time.Duration) error {
+func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) error {
 	tick := time.After(timeout)
 	countDeleted := 0
 
@@ -299,7 +299,7 @@ func (kd *kubeDeployer) WaitDeletion(w watch.Interface, timeout time.Duration) e
 	}
 }
 
-func (kd *kubeDeployer) ReadFromPod(podName string, containerName string, srcPath string) (io.Reader, error) {
+func (kd *kubeEngine) ReadFromPod(podName string, containerName string, srcPath string) (io.Reader, error) {
 	reader, outStream := io.Pipe()
 
 	req := kd.restclient.
@@ -339,7 +339,7 @@ func (kd *kubeDeployer) ReadFromPod(podName string, containerName string, srcPat
 	return reader, nil
 }
 
-func (kd *kubeDeployer) MakeTunnel() Tunnel {
+func (kd *kubeEngine) MakeTunnel() Tunnel {
 	return newTunnel(kd)
 }
 

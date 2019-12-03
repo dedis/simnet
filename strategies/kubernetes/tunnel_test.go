@@ -14,7 +14,7 @@ import (
 
 func TestTunnel_Create(t *testing.T) {
 	tun := Tunnel{
-		engine: &kubeDeployer{
+		engine: &kubeEngine{
 			config:  &rest.Config{},
 			mapping: routerMapping{},
 			pods:    []apiv1.Pod{{Status: apiv1.PodStatus{PodIP: "a.b.c.d"}}},
@@ -28,7 +28,7 @@ func TestTunnel_Create(t *testing.T) {
 }
 
 func TestTunnel_CreateWithNoPod(t *testing.T) {
-	tun := newTunnel(&kubeDeployer{})
+	tun := newTunnel(&kubeEngine{})
 
 	err := tun.Create(2000, "a.b.c.d", func(string) {})
 	require.Error(t, err)
@@ -37,7 +37,7 @@ func TestTunnel_CreateWithNoPod(t *testing.T) {
 
 func TestTunnel_BadRoundTripper(t *testing.T) {
 	tun := Tunnel{
-		engine: &kubeDeployer{
+		engine: &kubeEngine{
 			mapping: routerMapping{},
 			pods:    []apiv1.Pod{{Status: apiv1.PodStatus{PodIP: "a.b.c.d"}}},
 		},
@@ -51,7 +51,7 @@ func TestTunnel_BadRoundTripper(t *testing.T) {
 }
 
 func TestTunnel_CreateBadMapping(t *testing.T) {
-	tun := newTunnel(&kubeDeployer{
+	tun := newTunnel(&kubeEngine{
 		config:  &rest.Config{},
 		mapping: routerMapping{},
 		pods:    []apiv1.Pod{{Status: apiv1.PodStatus{PodIP: "a.b.c.d"}}},
@@ -63,7 +63,7 @@ func TestTunnel_CreateBadMapping(t *testing.T) {
 }
 
 func TestTunnel_CreateNoConnection(t *testing.T) {
-	tun := newTunnel(&kubeDeployer{
+	tun := newTunnel(&kubeEngine{
 		config: &rest.Config{},
 		mapping: routerMapping{
 			"a.b.c.d": []portTuple{{3000, 4000}},
