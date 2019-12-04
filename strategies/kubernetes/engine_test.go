@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -364,6 +365,7 @@ func TestEngine_MakeTunnel(t *testing.T) {
 
 func newKubeEngineTest(client kubernetes.Interface, ns string, nodes []string) *kubeEngine {
 	return &kubeEngine{
+		writer:    bytes.NewBuffer(nil),
 		client:    client,
 		namespace: ns,
 		nodes:     nodes,

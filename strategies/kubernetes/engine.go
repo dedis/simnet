@@ -77,6 +77,7 @@ type engine interface {
 }
 
 type kubeEngine struct {
+	writer          io.Writer
 	nodes           []string
 	namespace       string
 	config          *rest.Config
@@ -96,6 +97,7 @@ func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeEngin
 	}
 
 	return &kubeEngine{
+		writer:          os.Stdout,
 		nodes:           nodes,
 		namespace:       ns,
 		config:          config,
@@ -106,7 +108,7 @@ func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeEngin
 }
 
 func (kd kubeEngine) CreateDeployment() (watch.Interface, error) {
-	fmt.Print("Creating deployment...")
+	fmt.Fprint(kd.writer, "Creating deployment...")
 
 	intf := kd.client.AppsV1().Deployments(kd.namespace)
 
@@ -130,20 +132,20 @@ func (kd kubeEngine) CreateDeployment() (watch.Interface, error) {
 		}
 	}
 
-	fmt.Println(goterm.ResetLine("Creating deployment... ok"))
+	fmt.Fprintln(kd.writer, goterm.ResetLine("Creating deployment... ok"))
 
 	return w, nil
 }
 
 func (kd *kubeEngine) WaitDeployment(w watch.Interface, timeout time.Duration) error {
-	fmt.Print("Waiting deployment...")
+	fmt.Fprint(kd.writer, "Waiting deployment...")
 	readyMap := make(map[string]struct{})
 	tick := time.After(timeout)
 
 	for {
 		select {
 		case <-tick:
-			fmt.Println(goterm.ResetLine("Waiting deployment... failed"))
+			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... failed"))
 			return errors.New("timeout")
 		case evt := <-w.ResultChan():
 			dpl := evt.Object.(*appsv1.Deployment)
@@ -153,7 +155,7 @@ func (kd *kubeEngine) WaitDeployment(w watch.Interface, timeout time.Duration) e
 			}
 
 			if len(readyMap) == len(kd.nodes) {
-				fmt.Println(goterm.ResetLine("Waiting deployment... ok"))
+				fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... ok"))
 				return nil
 			}
 		}
@@ -161,7 +163,7 @@ func (kd *kubeEngine) WaitDeployment(w watch.Interface, timeout time.Duration) e
 }
 
 func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
-	fmt.Printf("Fetching pods...")
+	fmt.Fprintf(kd.writer, "Fetching pods...")
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, AppID),
@@ -175,13 +177,13 @@ func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 		return nil, fmt.Errorf("invalid number of pods: %d vs %d", len(pods.Items), len(kd.nodes))
 	}
 
-	fmt.Println(goterm.ResetLine("Fetching pods... ok"))
+	fmt.Fprintln(kd.writer, goterm.ResetLine("Fetching pods... ok"))
 	kd.pods = pods.Items
 	return pods.Items, nil
 }
 
 func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
-	fmt.Printf("Deploying the router...")
+	fmt.Fprintf(kd.writer, "Deploying the router...")
 
 	intf := kd.client.AppsV1().Deployments(kd.namespace)
 
@@ -211,20 +213,20 @@ func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
 		return nil, err
 	}
 
-	fmt.Println(goterm.ResetLine("Deploying the router... ok"))
+	fmt.Fprintln(kd.writer, goterm.ResetLine("Deploying the router... ok"))
 	kd.mapping = mapping
 	return w, nil
 }
 
 func (kd *kubeEngine) WaitRouter(w watch.Interface) error {
-	fmt.Printf("Waiting for the router...")
+	fmt.Fprintf(kd.writer, "Waiting for the router...")
 	for {
 		select {
 		// TODO: timeout
 		case evt := <-w.ResultChan():
 			dpl := evt.Object.(*appsv1.Deployment)
 			if dpl.Status.AvailableReplicas > 0 {
-				fmt.Println(goterm.ResetLine("Waiting for the router... ok"))
+				fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... ok"))
 				return nil
 			}
 		}
@@ -232,7 +234,7 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) error {
 }
 
 func (kd *kubeEngine) FetchRouter() (apiv1.Pod, error) {
-	fmt.Printf("Fetching the router...")
+	fmt.Fprintf(kd.writer, "Fetching the router...")
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, RouterID),
@@ -245,13 +247,13 @@ func (kd *kubeEngine) FetchRouter() (apiv1.Pod, error) {
 		return apiv1.Pod{}, errors.New("invalid number of pods")
 	}
 
-	fmt.Println(goterm.ResetLine("Fetching the router... ok"))
+	fmt.Fprintln(kd.writer, goterm.ResetLine("Fetching the router... ok"))
 	kd.router = pods.Items[0]
 	return pods.Items[0], nil
 }
 
 func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
-	fmt.Println("Deleting deployment...")
+	fmt.Fprintln(kd.writer, "Deleting deployment...")
 
 	deletePolicy := metav1.DeletePropagationForeground
 	deleteOptions := &metav1.DeleteOptions{
