@@ -2,7 +2,7 @@ run:
 	go run ./examples/status.go
 
 plot:
-	go run ./visu/mod.go ${ARGS}
+	go run ./metrics/plotter/ ${ARGS}
 
 clean:
 	kubectl delete deployments -l go.dedis.ch.app=simnet

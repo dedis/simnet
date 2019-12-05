@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/strategies"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
@@ -171,9 +172,9 @@ func (s *Strategy) Execute(round strategies.Round) error {
 // WriteStats fetches the stats of the nodes then write them into a JSON
 // formatted file.
 func (s *Strategy) WriteStats(filepath string) error {
-	stats := strategies.Stats{
+	stats := metrics.Stats{
 		Timestamp: s.executeTime.Unix(),
-		Nodes:     make(map[string]strategies.NodeStats),
+		Nodes:     make(map[string]metrics.NodeStats),
 	}
 
 	for _, pod := range s.pods {
@@ -182,7 +183,7 @@ func (s *Strategy) WriteStats(filepath string) error {
 			return err
 		}
 
-		stats.Nodes[pod.Name] = strategies.NewNodeStats(reader)
+		stats.Nodes[pod.Name] = metrics.NewNodeStats(reader)
 	}
 
 	f, err := os.Create(filepath)
