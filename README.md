@@ -98,7 +98,7 @@ make linux-menuconfig
 #   --> Networking support
 #   --> Networking options
 #   --> QoS and/or fair queuing
-#   --> Network Emulator (NETEM)
+#   --> Network Emulator (NETEM) + HTB
 # Press space until you have <*> for NETEM
 # Finally, save and close the menu
 

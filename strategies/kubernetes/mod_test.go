@@ -227,6 +227,10 @@ func (te *testEngine) FetchPods() ([]apiv1.Pod, error) {
 	return nil, te.errFetchPods
 }
 
+func (te *testEngine) UploadConfig() error {
+	return nil
+}
+
 func (te *testEngine) DeployRouter([]apiv1.Pod) (watch.Interface, error) {
 	return watch.NewFake(), te.errDeployRouter
 }
@@ -245,6 +249,10 @@ func (te *testEngine) DeleteAll() (watch.Interface, error) {
 
 func (te *testEngine) WaitDeletion(watch.Interface, time.Duration) error {
 	return te.errWaitDeletion
+}
+
+func (te *testEngine) WriteToPod(string, string, []string) (io.WriteCloser, error) {
+	return nil, nil
 }
 
 func (te *testEngine) ReadFromPod(string, string, string) (io.Reader, error) {

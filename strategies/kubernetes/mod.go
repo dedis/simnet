@@ -108,6 +108,11 @@ func (s *Strategy) Deploy() error {
 		return err
 	}
 
+	err = s.engine.UploadConfig()
+	if err != nil {
+		return err
+	}
+
 	s.pods = pods
 
 	w, err = s.engine.DeployRouter(pods)

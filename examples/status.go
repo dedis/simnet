@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -25,40 +24,32 @@ type StatusSimulationRound struct{}
 // Execute will contact each known node and ask for its status.
 func (r StatusSimulationRound) Execute(ctx context.Context, tun strategies.Tunnel) {
 	files := ctx.Value(kubernetes.FilesKey("private.toml")).(map[string]interface{})
-	wg := sync.WaitGroup{}
+	idents := make([]*network.ServerIdentity, 0, len(files))
+	root := ""
 
-	base := 5000
 	for ip, value := range files {
-		firstPort := base
-		base += 2
-		wg.Add(1)
-		go func(ip string, value interface{}) {
-			defer wg.Done()
-			err := tun.Create(firstPort, ip, func(addr string) {
-				si := value.(*network.ServerIdentity)
-				si.Address = network.Address("tls://" + addr)
+		if root == "" {
+			root = ip
+		}
 
-				cl := status.NewClient()
-				for i := 0; i < 100; i++ {
-					_, err := cl.Request(si)
-					if err != nil {
-						fmt.Println(err)
-						return
-					}
-
-					time.Sleep(100 * time.Millisecond)
-				}
-
-				fmt.Printf("[%s] Status done.\n", ip)
-			})
-
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			}
-		}(ip, value)
+		si := value.(*network.ServerIdentity)
+		si.Address = network.NewAddress(network.TLS, ip+":7770")
+		idents = append(idents, si)
 	}
 
-	wg.Wait()
+	fmt.Println("Checking connectivity...")
+	err := tun.Create(7770, root, func(addr string) {
+		idents[0].Address = network.NewAddress(network.TLS, addr)
+		client := status.NewClient()
+		_, err := client.CheckConnectivity(idents[0].GetPrivate(), idents, time.Minute, true)
+		if err != nil {
+			fmt.Printf("Error: %+v\n", err)
+		}
+	})
+
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+	}
 }
 
 func main() {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.dedis.ch/simnet/monitor/network"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -112,16 +113,16 @@ func TestEngine_FetchPods(t *testing.T) {
 		Items: []apiv1.Pod{
 			{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:   "a",
+					Name:   "node0",
 					Labels: map[string]string{LabelID: AppID},
 				},
 			},
 			{
-				ObjectMeta: metav1.ObjectMeta{Name: "b"},
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
 			},
 		},
 	}
-	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", []string{"a"})
+	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", 1)
 
 	pods, err := engine.FetchPods()
 	require.NoError(t, err)
@@ -194,7 +195,7 @@ func TestEngine_DeployRouterFailure(t *testing.T) {
 }
 
 func TestEngine_WaitRouter(t *testing.T) {
-	engine := newKubeEngineTest(fake.NewSimpleClientset(), "", nil)
+	engine := newKubeEngineTest(fake.NewSimpleClientset(), "", 0)
 
 	w := watch.NewFakeWithChanSize(1, false)
 	w.Modify(&appsv1.Deployment{
@@ -221,7 +222,7 @@ func TestEngine_FetchRouter(t *testing.T) {
 			},
 		},
 	}
-	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", nil)
+	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", 0)
 
 	router, err := engine.FetchRouter()
 	require.NoError(t, err)
@@ -255,7 +256,7 @@ func TestEngine_Delete(t *testing.T) {
 		return true, nil, nil
 	})
 
-	engine := newKubeEngineTest(client, "", nil)
+	engine := newKubeEngineTest(client, "", 0)
 
 	w, err := engine.DeleteAll()
 	require.NoError(t, err)
@@ -363,24 +364,18 @@ func TestEngine_MakeTunnel(t *testing.T) {
 	require.Equal(t, 1, len(tun.engine.pods))
 }
 
-func newKubeEngineTest(client kubernetes.Interface, ns string, nodes []string) *kubeEngine {
+func newKubeEngineTest(client kubernetes.Interface, ns string, n int) *kubeEngine {
 	return &kubeEngine{
 		writer:    bytes.NewBuffer(nil),
 		client:    client,
 		namespace: ns,
-		nodes:     nodes,
+		topology:  network.NewSimpleTopology(n),
 	}
 }
 
 func makeEngine(n int) (*kubeEngine, *fake.Clientset) {
 	client := fake.NewSimpleClientset()
-
-	nodes := make([]string, n)
-	for i := range nodes {
-		nodes[i] = fmt.Sprintf("node%d", i)
-	}
-
-	engine := newKubeEngineTest(client, "", nodes)
+	engine := newKubeEngineTest(client, "", n)
 
 	return engine, client
 }

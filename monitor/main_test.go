@@ -43,15 +43,20 @@ func TestMain_StopSignal(t *testing.T) {
 
 	os.Args = []string{os.Args[0], "-output", f.Name()}
 	go func() {
+		defer close(done)
 		main()
-		close(done)
 	}()
 
-	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-	select {
-	case <-done:
-	case <-time.After(1000 * time.Millisecond):
-		t.Fatal("timeout")
+	timeout := time.After(1000 * time.Millisecond)
+	for {
+		select {
+		case <-done:
+			return
+		case <-time.After(10 * time.Millisecond):
+			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		case <-timeout:
+			t.Fatal("timeout")
+		}
 	}
 }
 

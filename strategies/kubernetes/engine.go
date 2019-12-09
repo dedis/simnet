@@ -8,6 +8,8 @@ import (
 	"os"
 	"time"
 
+	"go.dedis.ch/simnet/monitor/network"
+
 	"github.com/buger/goterm"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
@@ -36,6 +38,9 @@ const (
 	AppID = "simnet-app"
 	// RouterID is the value of the component label for the router.
 	RouterID = "simnet-router"
+
+	// LabelNode is attached to the node identifier in the topology.
+	LabelNode = "go.dedis.ch.node.id"
 )
 
 var (
@@ -67,18 +72,20 @@ type engine interface {
 	CreateDeployment() (watch.Interface, error)
 	WaitDeployment(watch.Interface, time.Duration) error
 	FetchPods() ([]apiv1.Pod, error)
+	UploadConfig() error
 	DeployRouter([]apiv1.Pod) (watch.Interface, error)
 	WaitRouter(watch.Interface) error
 	FetchRouter() (apiv1.Pod, error)
 	DeleteAll() (watch.Interface, error)
 	WaitDeletion(watch.Interface, time.Duration) error
+	WriteToPod(string, string, []string) (io.WriteCloser, error)
 	ReadFromPod(string, string, string) (io.Reader, error)
 	MakeTunnel() Tunnel
 }
 
 type kubeEngine struct {
 	writer          io.Writer
-	nodes           []string
+	topology        network.Topology
 	namespace       string
 	config          *rest.Config
 	client          kubernetes.Interface
@@ -98,7 +105,7 @@ func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeEngin
 
 	return &kubeEngine{
 		writer:          os.Stdout,
-		nodes:           nodes,
+		topology:        network.NewSimpleTopology(3),
 		namespace:       ns,
 		config:          config,
 		client:          client,
@@ -123,8 +130,8 @@ func (kd kubeEngine) CreateDeployment() (watch.Interface, error) {
 		return nil, err
 	}
 
-	for _, node := range kd.nodes {
-		deployment := makeDeployment(node)
+	for _, node := range kd.topology.GetNodes() {
+		deployment := makeDeployment(node.String())
 
 		_, err = intf.Create(deployment)
 		if err != nil {
@@ -154,7 +161,7 @@ func (kd *kubeEngine) WaitDeployment(w watch.Interface, timeout time.Duration) e
 				readyMap[dpl.Name] = struct{}{}
 			}
 
-			if len(readyMap) == len(kd.nodes) {
+			if len(readyMap) == kd.topology.Len() {
 				fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... ok"))
 				return nil
 			}
@@ -173,13 +180,46 @@ func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 		return nil, err
 	}
 
-	if len(pods.Items) != len(kd.nodes) {
-		return nil, fmt.Errorf("invalid number of pods: %d vs %d", len(pods.Items), len(kd.nodes))
+	if len(pods.Items) != kd.topology.Len() {
+		return nil, fmt.Errorf("invalid number of pods: %d vs %d", len(pods.Items), kd.topology.Len())
 	}
 
 	fmt.Fprintln(kd.writer, goterm.ResetLine("Fetching pods... ok"))
 	kd.pods = pods.Items
 	return pods.Items, nil
+}
+
+func (kd *kubeEngine) UploadConfig() error {
+	ips := make(map[network.Node]string)
+	for _, pod := range kd.pods {
+		node := pod.Labels[LabelNode]
+
+		if node != "" {
+			ips[network.Node(node)] = pod.Status.PodIP
+		}
+	}
+
+	rules := kd.topology.Parse(ips)
+
+	for _, pod := range kd.pods {
+		writer, err := kd.WriteToPod(pod.Name, "monitor", []string{"sh", "-c", "./netem -"})
+		if err != nil {
+			return err
+		}
+
+		defer writer.Close()
+
+		node := network.Node(pod.Labels[LabelNode])
+
+		for _, rule := range rules[node] {
+			_, err = writer.Write([]byte(rule + "\n"))
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
@@ -293,12 +333,51 @@ func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) err
 				countDeleted++
 			}
 
-			if countDeleted >= len(kd.nodes)+1 {
+			if countDeleted >= kd.topology.Len()+1 {
 				// No more replicas so the deployment is deleted.
 				return nil
 			}
 		}
 	}
+}
+
+func (kd *kubeEngine) WriteToPod(podName string, containerName string, cmd []string) (io.WriteCloser, error) {
+	reader, writer := io.Pipe()
+
+	req := kd.restclient.
+		Post().
+		Namespace(kd.namespace).
+		Resource("pods").
+		Name(podName).
+		SubResource("exec").
+		VersionedParams(&apiv1.PodExecOptions{
+			Container: containerName,
+			Command:   cmd,
+			Stdin:     true,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+		}, scheme.ParameterCodec)
+
+	exec, err := kd.executorFactory(kd.config, "POST", req.URL())
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		err = exec.Stream(remotecommand.StreamOptions{
+			Stdin:  reader,
+			Stdout: os.Stdout,
+			Stderr: os.Stderr,
+			Tty:    false,
+		})
+
+		if err != nil {
+			fmt.Fprintf(kd.writer, "write error: %+v", err)
+		}
+	}()
+
+	return writer, nil
 }
 
 func (kd *kubeEngine) ReadFromPod(podName string, containerName string, srcPath string) (io.Reader, error) {
@@ -351,8 +430,9 @@ func int32Ptr(v int32) *int32 {
 
 func makeDeployment(node string) *appsv1.Deployment {
 	labels := map[string]string{
-		LabelApp: AppName,
-		LabelID:  AppID,
+		LabelApp:  AppName,
+		LabelID:   AppID,
+		LabelNode: node,
 	}
 
 	return &appsv1.Deployment{
@@ -400,37 +480,6 @@ func makeDeployment(node string) *appsv1.Deployment {
 							},
 						},
 						{
-							Name:  "pumba",
-							Image: "gaiaadm/pumba",
-							Args: []string{
-								"netem",
-								"--tc-image",
-								"gaiadocker/iproute2",
-								"--duration",
-								"1h",
-								"loss",
-								"--percent",
-								"30",
-								"re2:.*app_simnet-node0.*",
-							},
-							VolumeMounts: []apiv1.VolumeMount{
-								{
-									Name:      "dockersocket",
-									MountPath: "/var/run/docker.sock",
-								},
-							},
-							Resources: apiv1.ResourceRequirements{
-								Requests: apiv1.ResourceList{
-									"memory": DeamonRequestMemory,
-									"cpu":    DeamonRequestCPU,
-								},
-								Limits: apiv1.ResourceList{
-									"memory": DeamonLimitMemory,
-									"cpu":    DeamonLimitCPU,
-								},
-							},
-						},
-						{
 							Name:            "monitor",
 							Image:           "dedis/simnet-monitor:latest",
 							ImagePullPolicy: "Never", // TODO: Remove after the image is pushed to DockerHub.
@@ -442,6 +491,11 @@ func makeDeployment(node string) *appsv1.Deployment {
 								{
 									Name:      "dockersocket",
 									MountPath: "/var/run/docker.sock",
+								},
+							},
+							SecurityContext: &apiv1.SecurityContext{
+								Capabilities: &apiv1.Capabilities{
+									Add: []apiv1.Capability{"NET_ADMIN"},
 								},
 							},
 							Resources: apiv1.ResourceRequirements{
