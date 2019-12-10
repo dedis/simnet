@@ -4,16 +4,9 @@ import (
 	"context"
 )
 
-// Tunnel is an interface that will create tunnels to node of the simulation so
-// that simulation running on a private network can be accessible on a per
-// needed basis.
-type Tunnel interface {
-	Create(base int, ipaddr string, exec func(addr string)) error
-}
-
 // Round is executed during the simulation.
 type Round interface {
-	Execute(ctx context.Context, tun Tunnel)
+	Execute(ctx context.Context)
 }
 
 // Simulation provides the primitives to run a simulation from the

@@ -32,7 +32,7 @@ Follow the instructions [here](https://minikube.sigs.k8s.io/docs/start/) then
 
 ```bash
 # Start the cluster.
-minikube start
+minikube start --docker-opt bip=172.18.0.1/16
 
 # In case of error, you can first try to delete the previous cluster.
 minikube delete

@@ -11,7 +11,7 @@ import (
 
 type testRound struct{}
 
-func (t testRound) Execute(ctx context.Context, tun strategies.Tunnel) {}
+func (t testRound) Execute(ctx context.Context) {}
 
 type testStrategy struct {
 	errDeploy  error

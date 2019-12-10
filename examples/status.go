@@ -13,7 +13,6 @@ import (
 	"go.dedis.ch/onet/v3/app"
 	"go.dedis.ch/onet/v3/network"
 	"go.dedis.ch/simnet"
-	"go.dedis.ch/simnet/strategies"
 	"go.dedis.ch/simnet/strategies/kubernetes"
 )
 
@@ -22,7 +21,7 @@ import (
 type StatusSimulationRound struct{}
 
 // Execute will contact each known node and ask for its status.
-func (r StatusSimulationRound) Execute(ctx context.Context, tun strategies.Tunnel) {
+func (r StatusSimulationRound) Execute(ctx context.Context) {
 	files := ctx.Value(kubernetes.FilesKey("private.toml")).(map[string]interface{})
 	idents := make([]*network.ServerIdentity, 0, len(files))
 	root := ""
@@ -38,14 +37,11 @@ func (r StatusSimulationRound) Execute(ctx context.Context, tun strategies.Tunne
 	}
 
 	fmt.Println("Checking connectivity...")
-	err := tun.Create(7770, root, func(addr string) {
-		idents[0].Address = network.NewAddress(network.TLS, addr)
-		client := status.NewClient()
-		_, err := client.CheckConnectivity(idents[0].GetPrivate(), idents, time.Minute, true)
-		if err != nil {
-			fmt.Printf("Error: %+v\n", err)
-		}
-	})
+	client := status.NewClient()
+	_, err := client.CheckConnectivity(idents[0].GetPrivate(), idents, 5*time.Second, true)
+	if err != nil {
+		fmt.Printf("Error: %+v\n", err)
+	}
 
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)

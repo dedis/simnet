@@ -1,10 +1,14 @@
 FROM alpine
 
-RUN apk add --no-cache bash
-RUN apk add --no-cache socat
+EXPOSE 1194/udp
 
-WORKDIR /root/
+VOLUME [ "/etc/openvpn" ]
 
-COPY ./router/setup.sh .
+RUN apk add --no-cache openvpn
 
-ENTRYPOINT [ "./setup.sh" ]
+WORKDIR /app
+COPY ./router/openvpn.conf .
+COPY ./router/startup.sh .
+
+# Requires NET_ADMIN capabilities
+ENTRYPOINT [ "./startup.sh" ]

@@ -61,6 +61,7 @@ type Strategy struct {
 	namespace   string
 	options     *Options
 	pods        []apiv1.Pod
+	vpn         vpn
 	executeTime time.Time
 	doneTime    time.Time
 }
@@ -126,7 +127,13 @@ func (s *Strategy) Deploy() error {
 		return err
 	}
 
-	_, err = s.engine.FetchRouter()
+	vpn, err := s.engine.InitVPN()
+	if err != nil {
+		return err
+	}
+
+	s.vpn = vpn
+	err = vpn.Start()
 	if err != nil {
 		return err
 	}
@@ -141,7 +148,7 @@ func (s *Strategy) makeContext() (context.Context, error) {
 		files := make(map[string]interface{})
 
 		for _, pod := range s.pods {
-			reader, err := s.engine.ReadFromPod(pod.Name, "app", fm.Path)
+			reader, err := s.engine.ReadFile(pod.Name, fm.Path)
 			if err != nil {
 				return nil, err
 			}
@@ -167,7 +174,7 @@ func (s *Strategy) Execute(round strategies.Round) error {
 
 	s.executeTime = time.Now()
 
-	round.Execute(ctx, s.engine.MakeTunnel())
+	round.Execute(ctx)
 
 	s.doneTime = time.Now()
 
@@ -183,12 +190,12 @@ func (s *Strategy) WriteStats(filepath string) error {
 	}
 
 	for _, pod := range s.pods {
-		reader, err := s.engine.ReadFromPod(pod.Name, "monitor", "/root/data")
+		ns, err := s.engine.ReadStats(pod.Name)
 		if err != nil {
 			return err
 		}
 
-		stats.Nodes[pod.Name] = metrics.NewNodeStats(reader)
+		stats.Nodes[pod.Name] = ns
 	}
 
 	f, err := os.Create(filepath)
@@ -212,6 +219,13 @@ func (s *Strategy) WriteStats(filepath string) error {
 
 // Clean removes any resource created for the simulation.
 func (s *Strategy) Clean() error {
+	if s.vpn != nil {
+		err := s.vpn.Stop()
+		if err != nil {
+			fmt.Printf("Error: %+v\n", err)
+		}
+	}
+
 	w, err := s.engine.DeleteAll()
 	if err != nil {
 		return err

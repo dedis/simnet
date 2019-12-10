@@ -1,7 +1,6 @@
 package kubernetes
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -11,7 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.dedis.ch/simnet/strategies"
+	"go.dedis.ch/simnet/metrics"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -163,9 +162,10 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 }
 
 func TestStrategy_WriteStats(t *testing.T) {
+	reader, writer := io.Pipe()
 	stry := &Strategy{
 		pods:   []apiv1.Pod{{}},
-		engine: &testEngine{},
+		engine: &testEngine{reader: reader},
 	}
 
 	// Get a temporary file path.
@@ -174,6 +174,8 @@ func TestStrategy_WriteStats(t *testing.T) {
 
 	filepath := f.Name()
 	require.NoError(t, os.Remove(filepath))
+
+	writer.Close()
 
 	err = stry.WriteStats(filepath)
 	require.NoError(t, err)
@@ -204,6 +206,7 @@ func TestStrategy_CleanWithFailure(t *testing.T) {
 }
 
 type testEngine struct {
+	reader            io.ReadCloser
 	errDeployment     error
 	errWaitDeployment error
 	errFetchPods      error
@@ -239,8 +242,8 @@ func (te *testEngine) WaitRouter(watch.Interface) error {
 	return te.errWaitRouter
 }
 
-func (te *testEngine) FetchRouter() (apiv1.Pod, error) {
-	return apiv1.Pod{}, te.errFetchRouter
+func (te *testEngine) InitVPN() (vpn, error) {
+	return testVPN{}, te.errFetchRouter
 }
 
 func (te *testEngine) DeleteAll() (watch.Interface, error) {
@@ -251,24 +254,30 @@ func (te *testEngine) WaitDeletion(watch.Interface, time.Duration) error {
 	return te.errWaitDeletion
 }
 
-func (te *testEngine) WriteToPod(string, string, []string) (io.WriteCloser, error) {
-	return nil, nil
+func (te *testEngine) ReadStats(string) (metrics.NodeStats, error) {
+	return metrics.NodeStats{}, nil
 }
 
-func (te *testEngine) ReadFromPod(string, string, string) (io.Reader, error) {
-	return bytes.NewReader([]byte{}), te.errReadFromPod
-}
-
-func (te *testEngine) MakeTunnel() Tunnel {
-	return Tunnel{}
+func (te *testEngine) ReadFile(string, string) (io.Reader, error) {
+	return te.reader, te.errReadFromPod
 }
 
 type testRound struct {
 	h func(context.Context)
 }
 
-func (tr testRound) Execute(ctx context.Context, tun strategies.Tunnel) {
+func (tr testRound) Execute(ctx context.Context) {
 	if tr.h != nil {
 		tr.h(ctx)
 	}
+}
+
+type testVPN struct{}
+
+func (v testVPN) Start() error {
+	return nil
+}
+
+func (v testVPN) Stop() error {
+	return nil
 }

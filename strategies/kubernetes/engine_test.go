@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
-	"net/url"
 	"testing"
 	"time"
 
@@ -19,9 +19,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
-	restfake "k8s.io/client-go/rest/fake"
 	testcore "k8s.io/client-go/testing"
-	"k8s.io/client-go/tools/remotecommand"
 )
 
 const testTimeout = 500 * time.Millisecond
@@ -143,6 +141,28 @@ func TestEngine_FetchPodsFailure(t *testing.T) {
 	require.Equal(t, e, err)
 }
 
+func TestEngine_UploadConfig(t *testing.T) {
+	engine, _ := makeEngine(3)
+	engine.pods = []apiv1.Pod{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					LabelNode: "node0",
+				},
+			},
+		},
+	}
+
+	go func() {
+		bb, err := ioutil.ReadAll(engine.fs.(*testFS).reader)
+		require.NoError(t, err)
+		require.Contains(t, string(bb), "tc qdisc add dev eth0")
+	}()
+
+	err := engine.UploadConfig()
+	require.NoError(t, err)
+}
+
 func TestEngine_DeployRouter(t *testing.T) {
 	engine, _ := makeEngine(3)
 
@@ -208,42 +228,25 @@ func TestEngine_WaitRouter(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestEngine_FetchRouter(t *testing.T) {
+func TestEngine_InitVPN(t *testing.T) {
 	list := &apiv1.PodList{
 		Items: []apiv1.Pod{
 			{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:   "a",
+					Name:   "simnet-router",
 					Labels: map[string]string{LabelID: RouterID},
 				},
 			},
 			{
-				ObjectMeta: metav1.ObjectMeta{Name: "b"},
+				ObjectMeta: metav1.ObjectMeta{Name: "node0"},
 			},
 		},
 	}
-	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", 0)
+	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", 1)
 
-	router, err := engine.FetchRouter()
+	vpn, err := engine.InitVPN()
 	require.NoError(t, err)
-	require.Equal(t, "a", router.ObjectMeta.Name)
-}
-
-func TestEngine_FetchRouterFailure(t *testing.T) {
-	engine, client := makeEngine(0)
-
-	_, err := engine.FetchRouter()
-	require.Error(t, err)
-	require.Equal(t, "invalid number of pods", err.Error())
-
-	e := errors.New("list error")
-	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
-		return true, nil, e
-	})
-
-	_, err = engine.FetchRouter()
-	require.Error(t, err)
-	require.Equal(t, e, err)
+	require.NoError(t, vpn.Stop())
 }
 
 func TestEngine_Delete(t *testing.T) {
@@ -317,59 +320,18 @@ func TestEngine_WaitDeletionFailure(t *testing.T) {
 	require.Equal(t, "timeout", err.Error())
 }
 
-func TestEngine_ReadPod(t *testing.T) {
-	engine := kubeEngine{
-		client:          fake.NewSimpleClientset(),
-		restclient:      &restfake.RESTClient{},
-		config:          &rest.Config{},
-		executorFactory: testExecutorFactory,
-	}
-
-	reader, err := engine.ReadFromPod("pod", "container", "this/is/a/file")
-	require.NoError(t, err)
-
-	data, err := ioutil.ReadAll(reader)
-	require.NoError(t, err)
-	require.Equal(t, []byte("deadbeef"), data)
-}
-
-func TestEngine_ReadPodFailure(t *testing.T) {
-	engine := kubeEngine{
-		client:          fake.NewSimpleClientset(),
-		restclient:      &restfake.RESTClient{},
-		executorFactory: testExecutorFactory,
-	}
-
-	_, err := engine.ReadFromPod("", "", "")
-	require.Error(t, err)
-	require.Equal(t, "missing config", err.Error())
-
-	engine.config = &rest.Config{}
-	engine.executorFactory = testFailingExecutorFactory
-	reader, err := engine.ReadFromPod("", "", "")
-	require.NoError(t, err)
-
-	_, err = reader.Read(make([]byte, 1))
-	require.Error(t, err)
-	require.Equal(t, "io: read/write on closed pipe", err.Error())
-}
-
-func TestEngine_MakeTunnel(t *testing.T) {
-	engine := kubeEngine{
-		pods: []apiv1.Pod{{}},
-	}
-
-	tun := engine.MakeTunnel()
-	require.NotNil(t, tun)
-	require.Equal(t, 1, len(tun.engine.pods))
-}
-
 func newKubeEngineTest(client kubernetes.Interface, ns string, n int) *kubeEngine {
+	r, w := io.Pipe()
+
 	return &kubeEngine{
+		config: &rest.Config{
+			Host: "https://127.0.0.1:333",
+		},
 		writer:    bytes.NewBuffer(nil),
 		client:    client,
 		namespace: ns,
 		topology:  network.NewSimpleTopology(n),
+		fs:        &testFS{r, w},
 	}
 }
 
@@ -380,34 +342,17 @@ func makeEngine(n int) (*kubeEngine, *fake.Clientset) {
 	return engine, client
 }
 
-type fakeExecutor struct {
-	config *rest.Config
-	method string
-	url    *url.URL
-	err    error
+type testFS struct {
+	reader io.ReadCloser
+	writer io.WriteCloser
 }
 
-func testExecutorFactory(c *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
-	if c == nil {
-		return nil, errors.New("missing config")
-	}
-
-	return &fakeExecutor{c, m, u, nil}, nil
+func (fs *testFS) Read(pod, container, path string) (io.ReadCloser, error) {
+	r, w := io.Pipe()
+	w.Close()
+	return r, nil
 }
 
-func testFailingExecutorFactory(c *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
-	return &fakeExecutor{c, m, u, errors.New("stream error")}, nil
-}
-
-func (e *fakeExecutor) Stream(options remotecommand.StreamOptions) error {
-	if e.err != nil {
-		return e.err
-	}
-
-	if options.Stdout != nil {
-		_, err := options.Stdout.Write([]byte("deadbeef"))
-		return err
-	}
-
-	return nil
+func (fs *testFS) Write(pod, container string, cmd []string) (io.WriteCloser, error) {
+	return fs.writer, nil
 }

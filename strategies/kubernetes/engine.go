@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/monitor/network"
 
 	"github.com/buger/goterm"
@@ -17,16 +18,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 )
 
 const (
-	// RouterBasePort defines what will be the first port used when proxying port-forward
-	// to actual simulation nodes. It is then incremented by 1.
-	RouterBasePort = 6000
-
 	// LabelApp is the shared label between the simnet components.
 	LabelApp = "go.dedis.ch.app"
 	// AppName is the value of the shared label.
@@ -75,26 +71,21 @@ type engine interface {
 	UploadConfig() error
 	DeployRouter([]apiv1.Pod) (watch.Interface, error)
 	WaitRouter(watch.Interface) error
-	FetchRouter() (apiv1.Pod, error)
+	InitVPN() (vpn, error)
 	DeleteAll() (watch.Interface, error)
 	WaitDeletion(watch.Interface, time.Duration) error
-	WriteToPod(string, string, []string) (io.WriteCloser, error)
-	ReadFromPod(string, string, string) (io.Reader, error)
-	MakeTunnel() Tunnel
+	ReadStats(pod string) (metrics.NodeStats, error)
+	ReadFile(pod, path string) (io.Reader, error)
 }
 
 type kubeEngine struct {
-	writer          io.Writer
-	topology        network.Topology
-	namespace       string
-	config          *rest.Config
-	client          kubernetes.Interface
-	restclient      rest.Interface
-	executorFactory func(*rest.Config, string, *url.URL) (remotecommand.Executor, error)
-
-	router  apiv1.Pod
-	mapping routerMapping
-	pods    []apiv1.Pod
+	writer    io.Writer
+	topology  network.Topology
+	namespace string
+	config    *rest.Config
+	client    kubernetes.Interface
+	fs        fs
+	pods      []apiv1.Pod
 }
 
 func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeEngine, error) {
@@ -104,13 +95,18 @@ func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeEngin
 	}
 
 	return &kubeEngine{
-		writer:          os.Stdout,
-		topology:        network.NewSimpleTopology(3),
-		namespace:       ns,
-		config:          config,
-		client:          client,
-		restclient:      client.CoreV1().RESTClient(),
-		executorFactory: remotecommand.NewSPDYExecutor,
+		writer:    os.Stdout,
+		topology:  network.NewSimpleTopology(3),
+		namespace: ns,
+		config:    config,
+		client:    client,
+		fs: kfs{
+			restclient: client.CoreV1().RESTClient(),
+			namespace:  ns,
+			makeExecutor: func(u *url.URL) (remotecommand.Executor, error) {
+				return remotecommand.NewSPDYExecutor(config, "POST", u)
+			},
+		},
 	}, nil
 }
 
@@ -173,6 +169,7 @@ func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 	fmt.Fprintf(kd.writer, "Fetching pods...")
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
+		// TODO: fetch ready
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, AppID),
 	})
 
@@ -202,7 +199,7 @@ func (kd *kubeEngine) UploadConfig() error {
 	rules := kd.topology.Parse(ips)
 
 	for _, pod := range kd.pods {
-		writer, err := kd.WriteToPod(pod.Name, "monitor", []string{"sh", "-c", "./netem -"})
+		writer, err := kd.fs.Write(pod.Name, "monitor", []string{"sh", "-c", "./netem -"})
 		if err != nil {
 			return err
 		}
@@ -232,30 +229,29 @@ func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
 		return nil, err
 	}
 
-	base := int32(RouterBasePort)
-	mapping := make(map[string][]portTuple)
-
-	for _, pod := range pods {
-		ports := make([]portTuple, 0)
-
-		// expect the first container to be the application.
-		for _, port := range pod.Spec.Containers[0].Ports {
-			ports = append(ports, portTuple{pod: port.ContainerPort, router: base})
-			base++
-		}
-
-		mapping[pod.Status.PodIP] = ports
-	}
-
-	// Deploy the router that will redirect port forward tunnels to each pod.
-	_, err = intf.Create(makeRouterDeployment(mapping))
+	_, err = intf.Create(makeRouterDeployment())
 	if err != nil {
 		return nil, err
 	}
 
 	fmt.Fprintln(kd.writer, goterm.ResetLine("Deploying the router... ok"))
-	kd.mapping = mapping
 	return w, nil
+}
+
+func (kd *kubeEngine) createVPNService() error {
+	intf := kd.client.CoreV1().Services(kd.namespace)
+
+	opts, err := kd.makeRouterService()
+	if err != nil {
+		return err
+	}
+
+	_, err = intf.Create(opts)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (kd *kubeEngine) WaitRouter(w watch.Interface) error {
@@ -267,29 +263,61 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) error {
 			dpl := evt.Object.(*appsv1.Deployment)
 			if dpl.Status.AvailableReplicas > 0 {
 				fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... ok"))
+				err := kd.createVPNService()
+				if err != nil {
+					return err
+				}
 				return nil
 			}
 		}
 	}
 }
 
-func (kd *kubeEngine) FetchRouter() (apiv1.Pod, error) {
+func (kd *kubeEngine) InitVPN() (vpn, error) {
 	fmt.Fprintf(kd.writer, "Fetching the router...")
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, RouterID),
 	})
 	if err != nil {
-		return apiv1.Pod{}, err
+		return nil, err
 	}
 
 	if len(pods.Items) != 1 {
-		return apiv1.Pod{}, errors.New("invalid number of pods")
+		return nil, errors.New("invalid number of pods")
+	}
+
+	router := pods.Items[0]
+	// Those files are generated by the init container and thus they exist
+	// by definition as the app container wouldn't start if it has failed.
+	files := []string{
+		"/etc/openvpn/pki/issued/client1.crt",
+		"/etc/openvpn/pki/private/client1.key",
+		"/etc/openvpn/pki/ca.crt",
+	}
+	readers := make([]io.Reader, 3)
+
+	for i, file := range files {
+		r, err := kd.fs.Read(router.Name, "router", file)
+		if err != nil {
+			return nil, err
+		}
+
+		readers[i] = r
+	}
+
+	u, err := url.Parse(kd.config.Host)
+	if err != nil {
+		return nil, err
+	}
+
+	vpn, err := NewOvpn(WithHost(u.Hostname()), WithWriter(kd.writer), WithCertificate(readers[2], readers[1], readers[0]))
+	if err != nil {
+		return nil, err
 	}
 
 	fmt.Fprintln(kd.writer, goterm.ResetLine("Fetching the router... ok"))
-	kd.router = pods.Items[0]
-	return pods.Items[0], nil
+	return vpn, nil
 }
 
 func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
@@ -341,87 +369,19 @@ func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) err
 	}
 }
 
-func (kd *kubeEngine) WriteToPod(podName string, containerName string, cmd []string) (io.WriteCloser, error) {
-	reader, writer := io.Pipe()
-
-	req := kd.restclient.
-		Post().
-		Namespace(kd.namespace).
-		Resource("pods").
-		Name(podName).
-		SubResource("exec").
-		VersionedParams(&apiv1.PodExecOptions{
-			Container: containerName,
-			Command:   cmd,
-			Stdin:     true,
-			Stdout:    true,
-			Stderr:    true,
-			TTY:       false,
-		}, scheme.ParameterCodec)
-
-	exec, err := kd.executorFactory(kd.config, "POST", req.URL())
+func (kd *kubeEngine) ReadStats(pod string) (metrics.NodeStats, error) {
+	reader, err := kd.fs.Read(pod, "monitor", "/root/data")
 	if err != nil {
-		return nil, err
+		return metrics.NodeStats{}, err
 	}
 
-	go func() {
-		err = exec.Stream(remotecommand.StreamOptions{
-			Stdin:  reader,
-			Stdout: os.Stdout,
-			Stderr: os.Stderr,
-			Tty:    false,
-		})
+	ns := metrics.NewNodeStats(reader)
 
-		if err != nil {
-			fmt.Fprintf(kd.writer, "write error: %+v", err)
-		}
-	}()
-
-	return writer, nil
+	return ns, nil
 }
 
-func (kd *kubeEngine) ReadFromPod(podName string, containerName string, srcPath string) (io.Reader, error) {
-	reader, outStream := io.Pipe()
-
-	req := kd.restclient.
-		Get().
-		Namespace(kd.namespace).
-		Resource("pods").
-		Name(podName).
-		SubResource("exec").
-		VersionedParams(&apiv1.PodExecOptions{
-			Container: containerName,
-			Command:   []string{"cat", srcPath},
-			Stdin:     true,
-			Stdout:    true,
-			Stderr:    true,
-			TTY:       false,
-		}, scheme.ParameterCodec)
-
-	exec, err := kd.executorFactory(kd.config, "POST", req.URL())
-	if err != nil {
-		return nil, err
-	}
-
-	go func() {
-		defer outStream.Close()
-		err := exec.Stream(remotecommand.StreamOptions{
-			Stdin:  os.Stdin,
-			Stdout: outStream,
-			Stderr: os.Stderr,
-			Tty:    false,
-		})
-
-		if err != nil {
-			reader.CloseWithError(err)
-		}
-	}()
-
-	return reader, nil
-}
-
-func (kd *kubeEngine) MakeTunnel() Tunnel {
-	return newTunnel(kd)
+func (kd *kubeEngine) ReadFile(pod, path string) (io.Reader, error) {
+	return kd.fs.Read(pod, "app", path)
 }
 
 func int32Ptr(v int32) *int32 {
@@ -526,20 +486,7 @@ func makeDeployment(node string) *appsv1.Deployment {
 	}
 }
 
-func makeRouterDeployment(mapping map[string][]portTuple) *appsv1.Deployment {
-	containerPorts := make([]apiv1.ContainerPort, 0)
-	args := []string{}
-	for ip, tuples := range mapping {
-		for _, t := range tuples {
-			containerPorts = append(containerPorts, apiv1.ContainerPort{
-				Protocol:      apiv1.ProtocolTCP,
-				ContainerPort: t.router,
-			})
-
-			args = append(args, "--proxy", fmt.Sprintf("%d=%s:%d", t.router, ip, t.pod))
-		}
-	}
-
+func makeRouterDeployment() *appsv1.Deployment {
 	labels := map[string]string{
 		LabelApp: AppName,
 		LabelID:  RouterID,
@@ -560,17 +507,82 @@ func makeRouterDeployment(mapping map[string][]portTuple) *appsv1.Deployment {
 					Labels: labels,
 				},
 				Spec: apiv1.PodSpec{
+					InitContainers: []apiv1.Container{
+						// The initialization container will generate the
+						// different keys that will be used for the session.
+						{
+							Name:            "router-init",
+							Image:           "dedis/simnet-router-init:latest",
+							ImagePullPolicy: "Never",
+							VolumeMounts: []apiv1.VolumeMount{
+								{
+									Name:      "openvpn",
+									MountPath: "/etc/openvpn",
+								},
+							},
+						},
+					},
 					Containers: []apiv1.Container{
 						{
 							Name:            "router",
 							Image:           "dedis/simnet-router:latest",
 							ImagePullPolicy: "Never", // TODO: Remove after the image is pushed to DockerHub.
-							Ports:           containerPorts,
-							Args:            args,
+							Ports: []apiv1.ContainerPort{
+								{
+									ContainerPort: 1194,
+									Protocol:      apiv1.ProtocolUDP,
+								},
+							},
+							SecurityContext: &apiv1.SecurityContext{
+								Capabilities: &apiv1.Capabilities{
+									Add: []apiv1.Capability{"NET_ADMIN"},
+								},
+							},
+							VolumeMounts: []apiv1.VolumeMount{
+								{
+									Name:      "openvpn",
+									MountPath: "/etc/openvpn",
+								},
+							},
+						},
+					},
+					Volumes: []apiv1.Volume{
+						{
+							Name: "openvpn",
+							VolumeSource: apiv1.VolumeSource{
+								HostPath: &apiv1.HostPathVolumeSource{
+									Path: "/etc/openvpn",
+								},
+							},
 						},
 					},
 				},
 			},
 		},
 	}
+}
+
+func (kd kubeEngine) makeRouterService() (*apiv1.Service, error) {
+	u, err := url.Parse(kd.config.Host)
+	if err != nil {
+		return nil, err
+	}
+
+	return &apiv1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "simnet-router",
+		},
+		Spec: apiv1.ServiceSpec{
+			Ports: []apiv1.ServicePort{
+				{
+					Port:     1194,
+					Protocol: apiv1.ProtocolUDP,
+				},
+			},
+			ExternalIPs: []string{u.Hostname()},
+			Selector: map[string]string{
+				LabelID: RouterID,
+			},
+		},
+	}, nil
 }
