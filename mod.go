@@ -1,40 +1,38 @@
 package simnet
 
-import (
-	"go.dedis.ch/simnet/strategies"
-)
+import "go.dedis.ch/simnet/sim"
 
 // Simulation is a Kubernetes simulation.
 type Simulation struct {
-	engine strategies.Simulation
-	round  strategies.Round
+	strategy sim.Strategy
+	round    sim.Round
 }
 
 // NewSimulation creates a new simulation from the engine and the round.
-func NewSimulation(r strategies.Round, e strategies.Simulation) *Simulation {
-	return &Simulation{engine: e, round: r}
+func NewSimulation(r sim.Round, e sim.Strategy) *Simulation {
+	return &Simulation{strategy: e, round: r}
 }
 
 // Run uses the round interface to run the simulation.
-func (sim *Simulation) Run() (err error) {
-	err = sim.engine.Deploy()
+func (s *Simulation) Run() (err error) {
+	err = s.strategy.Deploy()
 	if err != nil {
 		return
 	}
 
 	defer func() {
-		errClean := sim.engine.Clean()
+		errClean := s.strategy.Clean()
 		if errClean != nil {
 			err = errClean
 		}
 	}()
 
-	err = sim.engine.Execute(sim.round)
+	err = s.strategy.Execute(s.round)
 	if err != nil {
 		return
 	}
 
-	err = sim.engine.WriteStats("result.json")
+	err = s.strategy.WriteStats("result.json")
 	if err != nil {
 		return
 	}

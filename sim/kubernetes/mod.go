@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"go.dedis.ch/simnet/metrics"
-	"go.dedis.ch/simnet/strategies"
+	"go.dedis.ch/simnet/sim"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -61,7 +61,7 @@ type Strategy struct {
 	namespace   string
 	options     *Options
 	pods        []apiv1.Pod
-	tun         Tunnel
+	tun         sim.Tunnel
 	executeTime time.Time
 	doneTime    time.Time
 }
@@ -166,7 +166,7 @@ func (s *Strategy) makeContext() (context.Context, error) {
 }
 
 // Execute uses the round implementation to execute a simulation round.
-func (s *Strategy) Execute(round strategies.Round) error {
+func (s *Strategy) Execute(round sim.Round) error {
 	ctx, err := s.makeContext()
 	if err != nil {
 		return err

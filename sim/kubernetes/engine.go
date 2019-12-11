@@ -10,6 +10,7 @@ import (
 
 	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/monitor/network"
+	"go.dedis.ch/simnet/sim"
 
 	"github.com/buger/goterm"
 	appsv1 "k8s.io/api/apps/v1"
@@ -71,7 +72,7 @@ type engine interface {
 	UploadConfig() error
 	DeployRouter([]apiv1.Pod) (watch.Interface, error)
 	WaitRouter(watch.Interface) error
-	InitVPN() (Tunnel, error)
+	InitVPN() (sim.Tunnel, error)
 	DeleteAll() (watch.Interface, error)
 	WaitDeletion(watch.Interface, time.Duration) error
 	ReadStats(pod string) (metrics.NodeStats, error)
@@ -273,7 +274,7 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) error {
 	}
 }
 
-func (kd *kubeEngine) InitVPN() (Tunnel, error) {
+func (kd *kubeEngine) InitVPN() (sim.Tunnel, error) {
 	fmt.Fprintf(kd.writer, "Fetching the router...")
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
@@ -311,7 +312,7 @@ func (kd *kubeEngine) InitVPN() (Tunnel, error) {
 		return nil, err
 	}
 
-	vpn, err := NewDefaultTunnel(WithHost(u.Hostname()), WithCertificate(readers[2], readers[1], readers[0]))
+	vpn, err := sim.NewDefaultTunnel(sim.WithHost(u.Hostname()), sim.WithCertificate(readers[2], readers[1], readers[0]))
 	if err != nil {
 		return nil, err
 	}

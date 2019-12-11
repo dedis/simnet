@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/simnet/metrics"
+	"go.dedis.ch/simnet/sim"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -242,7 +243,7 @@ func (te *testEngine) WaitRouter(watch.Interface) error {
 	return te.errWaitRouter
 }
 
-func (te *testEngine) InitVPN() (Tunnel, error) {
+func (te *testEngine) InitVPN() (sim.Tunnel, error) {
 	return testVPN{}, te.errFetchRouter
 }
 

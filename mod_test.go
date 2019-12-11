@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.dedis.ch/simnet/strategies"
+	"go.dedis.ch/simnet/sim"
 )
 
 type testRound struct{}
@@ -28,7 +28,7 @@ func (e *testStrategy) Deploy() error {
 	return nil
 }
 
-func (e *testStrategy) Execute(strategies.Round) error {
+func (e *testStrategy) Execute(sim.Round) error {
 	if e.errExecute != nil {
 		return e.errExecute
 	}

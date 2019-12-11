@@ -13,7 +13,7 @@ import (
 	"go.dedis.ch/onet/v3/app"
 	"go.dedis.ch/onet/v3/network"
 	"go.dedis.ch/simnet"
-	"go.dedis.ch/simnet/strategies/kubernetes"
+	"go.dedis.ch/simnet/sim/kubernetes"
 )
 
 // StatusSimulationRound contacts each node of the simulation network and asks

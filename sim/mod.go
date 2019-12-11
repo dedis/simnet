@@ -1,4 +1,4 @@
-package strategies
+package sim
 
 import (
 	"context"
@@ -9,10 +9,10 @@ type Round interface {
 	Execute(ctx context.Context)
 }
 
-// Simulation provides the primitives to run a simulation from the
+// Strategy provides the primitives to run a simulation from the
 // deployment, to the execution of the simulation round and finally the
 // cleaning.
-type Simulation interface {
+type Strategy interface {
 	Deploy() error
 	Execute(Round) error
 	WriteStats(filepath string) error
