@@ -325,6 +325,32 @@ func TestEngine_WaitDeletionFailure(t *testing.T) {
 	require.Equal(t, "timeout", err.Error())
 }
 
+func TestEngine_ReadStats(t *testing.T) {
+	engine := &kubeEngine{
+		fs: &testFS{},
+	}
+
+	stats, err := engine.ReadStats("pod-name")
+	require.NoError(t, err)
+	require.NotNil(t, stats)
+
+	e := errors.New("oops")
+	engine.fs = &testFS{err: e}
+	_, err = engine.ReadStats("pod-name")
+	require.Error(t, err)
+	require.Equal(t, e, err)
+}
+
+func TestEngine_ReadFile(t *testing.T) {
+	engine := &kubeEngine{
+		fs: &testFS{},
+	}
+
+	reader, err := engine.ReadFile("pod-name", "file-path")
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+}
+
 func newKubeEngineTest(client kubernetes.Interface, ns string, n int) *kubeEngine {
 	r, w := io.Pipe()
 
@@ -336,7 +362,7 @@ func newKubeEngineTest(client kubernetes.Interface, ns string, n int) *kubeEngin
 		client:    client,
 		namespace: ns,
 		topology:  network.NewSimpleTopology(n),
-		fs:        &testFS{r, w},
+		fs:        &testFS{reader: r, writer: w},
 	}
 }
 
@@ -348,6 +374,7 @@ func makeEngine(n int) (*kubeEngine, *fake.Clientset) {
 }
 
 type testFS struct {
+	err    error
 	reader io.ReadCloser
 	writer io.WriteCloser
 }
@@ -355,9 +382,9 @@ type testFS struct {
 func (fs *testFS) Read(pod, container, path string) (io.ReadCloser, error) {
 	r, w := io.Pipe()
 	w.Close()
-	return r, nil
+	return r, fs.err
 }
 
 func (fs *testFS) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan error, error) {
-	return fs.writer, nil, nil
+	return fs.writer, nil, fs.err
 }

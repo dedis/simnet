@@ -312,13 +312,13 @@ func (kd *kubeEngine) InitVPN() (sim.Tunnel, error) {
 		return nil, err
 	}
 
-	vpn, err := sim.NewDefaultTunnel(sim.WithHost(u.Hostname()), sim.WithCertificate(readers[2], readers[1], readers[0]))
+	tun, err := sim.NewDefaultTunnel(sim.WithHost(u.Hostname()), sim.WithCertificate(readers[2], readers[1], readers[0]))
 	if err != nil {
 		return nil, err
 	}
 
 	fmt.Fprintln(kd.writer, goterm.ResetLine("Fetching the router... ok"))
-	return vpn, nil
+	return tun, nil
 }
 
 func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {

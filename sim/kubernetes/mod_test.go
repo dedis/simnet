@@ -185,25 +185,39 @@ func TestStrategy_WriteStats(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestStrategy_CleanWithFailure(t *testing.T) {
+func TestStrategy_Clean(t *testing.T) {
 	stry := &Strategy{
 		engine: &testEngine{},
+		tun:    testTunnel{},
 	}
 
 	err := stry.Clean()
 	require.NoError(t, err)
+}
 
-	e := errors.New("delete all error")
+func TestStrategy_CleanWithFailure(t *testing.T) {
+	e := errors.New("tunnel error")
+	stry := &Strategy{
+		tun:    testTunnel{err: e},
+		engine: &testEngine{},
+	}
+
+	err := stry.Clean()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), e.Error())
+
+	e = errors.New("delete all error")
+	stry.tun = nil
 	stry.engine = &testEngine{errDeleteAll: e}
 	err = stry.Clean()
 	require.Error(t, err)
-	require.Equal(t, e, err)
+	require.Contains(t, err.Error(), e.Error())
 
 	e = errors.New("delete wait error")
 	stry.engine = &testEngine{errWaitDeletion: e}
 	err = stry.Clean()
 	require.Error(t, err)
-	require.Equal(t, e, err)
+	require.Contains(t, err.Error(), e.Error())
 }
 
 type testEngine struct {
@@ -281,4 +295,16 @@ func (v testVPN) Start() error {
 
 func (v testVPN) Stop() error {
 	return nil
+}
+
+type testTunnel struct {
+	err error
+}
+
+func (t testTunnel) Start() error {
+	return t.err
+}
+
+func (t testTunnel) Stop() error {
+	return t.err
 }

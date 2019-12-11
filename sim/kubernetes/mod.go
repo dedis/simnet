@@ -219,23 +219,29 @@ func (s *Strategy) WriteStats(filepath string) error {
 
 // Clean removes any resource created for the simulation.
 func (s *Strategy) Clean() error {
+	errs := make([]error, 0, 2)
+
 	if s.tun != nil {
 		err := s.tun.Stop()
 		if err != nil {
-			fmt.Printf("Error: %+v\n", err)
+			errs = append(errs, err)
 		}
 	}
 
 	w, err := s.engine.DeleteAll()
 	if err != nil {
-		return err
+		errs = append(errs, err)
+	} else {
+		defer w.Stop()
+
+		err = s.engine.WaitDeletion(w, 60*time.Second)
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
 
-	defer w.Stop()
-
-	err = s.engine.WaitDeletion(w, 60*time.Second)
-	if err != nil {
-		return err
+	if len(errs) > 0 {
+		return fmt.Errorf("cleaning error: %v", errs)
 	}
 
 	return nil

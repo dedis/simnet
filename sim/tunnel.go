@@ -70,6 +70,8 @@ func WithCertificate(ca, key, cert io.Reader) TunOption {
 type DefaultTunnel struct {
 	cmd     *exec.Cmd
 	dir     string
+	logFile string
+	pidFile string
 	host    string
 	in      io.ReadCloser
 	timeout time.Duration
@@ -108,6 +110,8 @@ func NewDefaultTunnel(opts ...TunOption) (*DefaultTunnel, error) {
 		cmd:     cmd,
 		host:    options.Host,
 		dir:     dir,
+		logFile: filepath.Join(dir, LogFileName),
+		pidFile: filepath.Join(dir, PIDFileName),
 		timeout: VpnConnectionTimeout,
 	}, nil
 }
@@ -115,7 +119,7 @@ func NewDefaultTunnel(opts ...TunOption) (*DefaultTunnel, error) {
 // Start runs the openvpn process and returns any error that could happen before
 // the tunnel is setup.
 func (v *DefaultTunnel) Start() error {
-	file, err := os.Create(filepath.Join(v.dir, LogFileName))
+	file, err := os.Create(v.logFile)
 	if err != nil {
 		return err
 	}
@@ -154,10 +158,10 @@ func (v *DefaultTunnel) Start() error {
 		usr.Username,
 		"--daemon",
 		"--log",
-		filepath.Join(v.dir, LogFileName),
+		v.logFile,
 		"--machine-readable-output",
 		"--writepid",
-		filepath.Join(v.dir, PIDFileName),
+		v.pidFile,
 		"--verb",
 		"3",
 	}
@@ -167,7 +171,7 @@ func (v *DefaultTunnel) Start() error {
 
 	err = cmd.Run()
 	if err != nil {
-		return fmt.Errorf("vpn initialization failed: see %s", filepath.Join(v.dir, LogFileName))
+		return fmt.Errorf("vpn initialization failed: see %s", v.logFile)
 	}
 
 	timeout := time.After(v.timeout)
@@ -193,7 +197,7 @@ func (v *DefaultTunnel) Start() error {
 func (v *DefaultTunnel) Stop() error {
 	defer os.RemoveAll(v.dir)
 
-	file, err := os.Open(filepath.Join(v.dir, PIDFileName))
+	file, err := os.Open(v.pidFile)
 	if err != nil {
 		return err
 	}
