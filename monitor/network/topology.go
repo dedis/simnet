@@ -34,7 +34,7 @@ func NewSimpleTopology(n int) Topology {
 
 		if i != 0 {
 			t.links[key] = []Link{
-				{Distant: t.nodes[0], Delay: 300, Loss: 0},
+				{Distant: t.nodes[0], Delay: 50, Loss: 0},
 			}
 		}
 	}

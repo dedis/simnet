@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/url"
-	"os"
 
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -101,12 +100,13 @@ func (fs kfs) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan
 	}
 
 	done := make(chan error, 1)
+	out := new(bytes.Buffer)
 
 	go func() {
 		err = exec.Stream(remotecommand.StreamOptions{
 			Stdin:  reader,
-			Stdout: os.Stdout,
-			Stderr: os.Stderr,
+			Stdout: out,
+			Stderr: out,
 			Tty:    false,
 		})
 

@@ -78,13 +78,13 @@ func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 		nodes[i] = fmt.Sprintf("node%d", i)
 	}
 
-	deployer, err := newKubeDeployer(config, "default", nodes)
+	engine, err := newKubeDeployer(config, "default", nodes)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Strategy{
-		engine:    deployer,
+		engine:    engine,
 		namespace: "default",
 		options:   NewOptions(opts),
 	}, nil

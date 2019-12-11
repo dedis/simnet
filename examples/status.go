@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/buger/goterm"
 	status "go.dedis.ch/cothority/v3/status/service"
 	"go.dedis.ch/onet/v3/app"
 	"go.dedis.ch/onet/v3/network"
@@ -31,16 +32,21 @@ func (r StatusSimulationRound) Execute(ctx context.Context) {
 		idents = append(idents, si)
 	}
 
-	fmt.Println("Checking connectivity...")
+	fmt.Print("Checking connectivity...")
 	client := status.NewClient()
-	_, err := client.CheckConnectivity(idents[0].GetPrivate(), idents, 5*time.Second, true)
-	if err != nil {
-		fmt.Printf("Error: %+v\n", err)
+
+	for i := range idents {
+		ro := append(idents[:i], idents[i+1:]...)
+		ro = append(idents[i:i], ro...)
+
+		fmt.Printf(goterm.ResetLine("Checking connectivity... [%d/%d]"), i+1, len(idents))
+		_, err := client.CheckConnectivity(ro[0].GetPrivate(), ro, 5*time.Second, true)
+		if err != nil {
+			fmt.Printf("Error: %+v\n", err)
+		}
 	}
 
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-	}
+	fmt.Println(goterm.ResetLine("Checking connectivity... ok"))
 }
 
 func main() {
