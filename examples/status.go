@@ -24,13 +24,8 @@ type StatusSimulationRound struct{}
 func (r StatusSimulationRound) Execute(ctx context.Context) {
 	files := ctx.Value(kubernetes.FilesKey("private.toml")).(map[string]interface{})
 	idents := make([]*network.ServerIdentity, 0, len(files))
-	root := ""
 
 	for ip, value := range files {
-		if root == "" {
-			root = ip
-		}
-
 		si := value.(*network.ServerIdentity)
 		si.Address = network.NewAddress(network.TLS, ip+":7770")
 		idents = append(idents, si)

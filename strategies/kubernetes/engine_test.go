@@ -246,12 +246,17 @@ func TestEngine_InitVPN(t *testing.T) {
 
 	vpn, err := engine.InitVPN()
 	require.NoError(t, err)
-	require.NoError(t, vpn.Stop())
+	require.NotNil(t, vpn)
 }
 
 func TestEngine_Delete(t *testing.T) {
+	srvice := &apiv1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "simnet-router"},
+	}
+
+	client := fake.NewSimpleClientset(srvice)
+
 	actions := make(chan testcore.Action, 1)
-	client := fake.NewSimpleClientset()
 	// As the fake client does not implement the delete collection action, we
 	// test differently by listening for the action.
 	client.AddReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
@@ -353,6 +358,6 @@ func (fs *testFS) Read(pod, container, path string) (io.ReadCloser, error) {
 	return r, nil
 }
 
-func (fs *testFS) Write(pod, container string, cmd []string) (io.WriteCloser, error) {
-	return fs.writer, nil
+func (fs *testFS) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan error, error) {
+	return fs.writer, nil, nil
 }

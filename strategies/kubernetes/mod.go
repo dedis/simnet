@@ -61,7 +61,7 @@ type Strategy struct {
 	namespace   string
 	options     *Options
 	pods        []apiv1.Pod
-	vpn         vpn
+	tun         Tunnel
 	executeTime time.Time
 	doneTime    time.Time
 }
@@ -132,7 +132,7 @@ func (s *Strategy) Deploy() error {
 		return err
 	}
 
-	s.vpn = vpn
+	s.tun = vpn
 	err = vpn.Start()
 	if err != nil {
 		return err
@@ -219,8 +219,8 @@ func (s *Strategy) WriteStats(filepath string) error {
 
 // Clean removes any resource created for the simulation.
 func (s *Strategy) Clean() error {
-	if s.vpn != nil {
-		err := s.vpn.Stop()
+	if s.tun != nil {
+		err := s.tun.Stop()
 		if err != nil {
 			fmt.Printf("Error: %+v\n", err)
 		}

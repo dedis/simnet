@@ -3,7 +3,6 @@ package kubernetes
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -16,7 +15,7 @@ import (
 
 type fs interface {
 	Read(string, string, string) (io.ReadCloser, error)
-	Write(string, string, []string) (io.WriteCloser, error)
+	Write(string, string, []string) (io.WriteCloser, <-chan error, error)
 }
 
 type kfs struct {
@@ -37,7 +36,7 @@ func (fs kfs) Read(pod, container, path string) (io.ReadCloser, error) {
 		VersionedParams(&apiv1.PodExecOptions{
 			Container: container,
 			Command:   []string{"cat", path},
-			Stdin:     true,
+			Stdin:     false,
 			Stdout:    true,
 			Stderr:    true,
 			TTY:       false,
@@ -64,7 +63,6 @@ func (fs kfs) Read(pod, container, path string) (io.ReadCloser, error) {
 		outErr := new(bytes.Buffer)
 
 		err = exec.Stream(remotecommand.StreamOptions{
-			Stdin:  os.Stdin,
 			Stdout: outStream,
 			Stderr: outErr,
 			Tty:    false,
@@ -79,7 +77,7 @@ func (fs kfs) Read(pod, container, path string) (io.ReadCloser, error) {
 	return reader, nil
 }
 
-func (fs kfs) Write(pod, container string, cmd []string) (io.WriteCloser, error) {
+func (fs kfs) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan error, error) {
 	reader, writer := io.Pipe()
 
 	req := fs.restclient.
@@ -99,8 +97,10 @@ func (fs kfs) Write(pod, container string, cmd []string) (io.WriteCloser, error)
 
 	exec, err := fs.makeExecutor(req.URL())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	done := make(chan error, 1)
 
 	go func() {
 		err = exec.Stream(remotecommand.StreamOptions{
@@ -110,10 +110,8 @@ func (fs kfs) Write(pod, container string, cmd []string) (io.WriteCloser, error)
 			Tty:    false,
 		})
 
-		if err != nil {
-			fmt.Printf("write error: %+v", err)
-		}
+		done <- err
 	}()
 
-	return writer, nil
+	return writer, done, nil
 }

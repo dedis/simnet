@@ -242,7 +242,7 @@ func (te *testEngine) WaitRouter(watch.Interface) error {
 	return te.errWaitRouter
 }
 
-func (te *testEngine) InitVPN() (vpn, error) {
+func (te *testEngine) InitVPN() (Tunnel, error) {
 	return testVPN{}, te.errFetchRouter
 }
 

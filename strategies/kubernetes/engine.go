@@ -71,7 +71,7 @@ type engine interface {
 	UploadConfig() error
 	DeployRouter([]apiv1.Pod) (watch.Interface, error)
 	WaitRouter(watch.Interface) error
-	InitVPN() (vpn, error)
+	InitVPN() (Tunnel, error)
 	DeleteAll() (watch.Interface, error)
 	WaitDeletion(watch.Interface, time.Duration) error
 	ReadStats(pod string) (metrics.NodeStats, error)
@@ -199,7 +199,7 @@ func (kd *kubeEngine) UploadConfig() error {
 	rules := kd.topology.Parse(ips)
 
 	for _, pod := range kd.pods {
-		writer, err := kd.fs.Write(pod.Name, "monitor", []string{"sh", "-c", "./netem -"})
+		writer, _, err := kd.fs.Write(pod.Name, "monitor", []string{"sh", "-c", "./netem -"})
 		if err != nil {
 			return err
 		}
@@ -273,7 +273,7 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) error {
 	}
 }
 
-func (kd *kubeEngine) InitVPN() (vpn, error) {
+func (kd *kubeEngine) InitVPN() (Tunnel, error) {
 	fmt.Fprintf(kd.writer, "Fetching the router...")
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
@@ -311,7 +311,7 @@ func (kd *kubeEngine) InitVPN() (vpn, error) {
 		return nil, err
 	}
 
-	vpn, err := NewOvpn(WithHost(u.Hostname()), WithWriter(kd.writer), WithCertificate(readers[2], readers[1], readers[0]))
+	vpn, err := NewDefaultTunnel(WithHost(u.Hostname()), WithCertificate(readers[2], readers[1], readers[0]))
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +321,7 @@ func (kd *kubeEngine) InitVPN() (vpn, error) {
 }
 
 func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
-	fmt.Fprintln(kd.writer, "Deleting deployment...")
+	fmt.Fprintln(kd.writer, "Cleaning namespace...")
 
 	deletePolicy := metav1.DeletePropagationForeground
 	deleteOptions := &metav1.DeleteOptions{
@@ -330,6 +330,11 @@ func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
 
 	selector := metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", LabelApp, AppName),
+	}
+
+	err := kd.deleteService(deleteOptions)
+	if err != nil {
+		return nil, err
 	}
 
 	intf := kd.client.AppsV1().Deployments(kd.namespace)
@@ -345,6 +350,17 @@ func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
 	}
 
 	return w, nil
+}
+
+func (kd *kubeEngine) deleteService(opts *metav1.DeleteOptions) error {
+	intf := kd.client.CoreV1().Services(kd.namespace)
+
+	err := intf.Delete("simnet-router", opts)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) error {
