@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -97,7 +98,7 @@ func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeEngin
 
 	return &kubeEngine{
 		writer:    os.Stdout,
-		topology:  network.NewSimpleTopology(5),
+		topology:  network.NewSimpleTopology(5, 50*time.Millisecond),
 		namespace: ns,
 		config:    config,
 		client:    client,
@@ -188,16 +189,14 @@ func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 }
 
 func (kd *kubeEngine) UploadConfig() error {
-	ips := make(map[network.Node]string)
+	mapping := make(map[network.Node]string)
 	for _, pod := range kd.pods {
 		node := pod.Labels[LabelNode]
 
 		if node != "" {
-			ips[network.Node(node)] = pod.Status.PodIP
+			mapping[network.Node(node)] = pod.Status.PodIP
 		}
 	}
-
-	rules := kd.topology.Parse(ips)
 
 	for _, pod := range kd.pods {
 		writer, _, err := kd.fs.Write(pod.Name, "monitor", []string{"sh", "-c", "./netem -"})
@@ -205,15 +204,16 @@ func (kd *kubeEngine) UploadConfig() error {
 			return err
 		}
 
-		defer writer.Close()
-
 		node := network.Node(pod.Labels[LabelNode])
 
-		for _, rule := range rules[node] {
-			_, err = writer.Write([]byte(rule + "\n"))
-			if err != nil {
-				return err
-			}
+		enc := json.NewEncoder(writer)
+		err = enc.Encode(kd.topology.Rules(node, mapping))
+
+		// In any case, the writer is closed.
+		writer.Close()
+
+		if err != nil {
+			return err
 		}
 	}
 

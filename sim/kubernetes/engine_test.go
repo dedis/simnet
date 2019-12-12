@@ -2,10 +2,11 @@ package kubernetes
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"sync"
 	"testing"
 	"time"
 
@@ -147,20 +148,28 @@ func TestEngine_UploadConfig(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					LabelNode: "node0",
+					LabelNode: "node1",
 				},
 			},
 		},
 	}
 
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
-		bb, err := ioutil.ReadAll(engine.fs.(*testFS).reader)
+		defer wg.Done()
+		dec := json.NewDecoder(engine.fs.(*testFS).reader)
+
+		var rules []network.RuleJSON
+		err := dec.Decode(&rules)
 		require.NoError(t, err)
-		require.Contains(t, string(bb), "tc qdisc add dev eth0")
+		require.Equal(t, 1, len(rules))
 	}()
 
 	err := engine.UploadConfig()
 	require.NoError(t, err)
+
+	wg.Wait()
 }
 
 func TestEngine_DeployRouter(t *testing.T) {
@@ -361,7 +370,7 @@ func newKubeEngineTest(client kubernetes.Interface, ns string, n int) *kubeEngin
 		writer:    bytes.NewBuffer(nil),
 		client:    client,
 		namespace: ns,
-		topology:  network.NewSimpleTopology(n),
+		topology:  network.NewSimpleTopology(n, 50*time.Millisecond),
 		fs:        &testFS{reader: r, writer: w},
 	}
 }

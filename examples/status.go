@@ -36,14 +36,18 @@ func (r StatusSimulationRound) Execute(ctx context.Context) {
 	client := status.NewClient()
 
 	for i := range idents {
-		ro := append(idents[:i], idents[i+1:]...)
-		ro = append(idents[i:i], ro...)
+		ro := make([]*network.ServerIdentity, 1, len(idents))
+		ro[0] = idents[i]
+		ro = append(ro, idents[:i]...)
+		ro = append(ro, idents[i+1:]...)
 
 		fmt.Printf(goterm.ResetLine("Checking connectivity... [%d/%d]"), i+1, len(idents))
 		_, err := client.CheckConnectivity(ro[0].GetPrivate(), ro, 5*time.Second, true)
 		if err != nil {
 			fmt.Printf("Error: %+v\n", err)
 		}
+
+		time.Sleep(1 * time.Second)
 	}
 
 	fmt.Println(goterm.ResetLine("Checking connectivity... ok"))

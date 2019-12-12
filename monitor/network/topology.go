@@ -2,26 +2,34 @@ package network
 
 import (
 	"fmt"
+	"time"
 )
 
+// Node is a peer of the topology.
 type Node string
 
 func (n Node) String() string {
 	return string(n)
 }
 
+// Link is a network link from the host to the node. It defines the properties
+// of the link like a delay or a percentage of loss.
 type Link struct {
 	Distant Node
-	Delay   int
+	Delay   time.Duration
 	Loss    float64
 }
 
+// Topology represents a network map where the links between nodes have defined
+// properties.
 type Topology struct {
 	nodes []Node
 	links map[Node][]Link
 }
 
-func NewSimpleTopology(n int) Topology {
+// NewSimpleTopology creates a simple topology where every link between two
+// nodes has a small delay.
+func NewSimpleTopology(n int, delay time.Duration) Topology {
 	t := Topology{
 		nodes: make([]Node, n),
 		links: make(map[Node][]Link),
@@ -34,7 +42,7 @@ func NewSimpleTopology(n int) Topology {
 
 		if i != 0 {
 			t.links[key] = []Link{
-				{Distant: t.nodes[0], Delay: 50, Loss: 0},
+				{Distant: t.nodes[0], Delay: 200, Loss: 0},
 			}
 		}
 	}
@@ -42,35 +50,24 @@ func NewSimpleTopology(n int) Topology {
 	return t
 }
 
+// Len returns the number of nodes in the topology.
 func (t Topology) Len() int {
 	return len(t.nodes)
 }
 
+// GetNodes returns the nodes.
 func (t Topology) GetNodes() []Node {
 	return t.nodes
 }
 
-func (t Topology) Parse(ips map[Node]string) map[Node][]string {
-	rules := make(map[Node][]string)
-	for node, links := range t.links {
-		cmds := []string{
-			"tc qdisc add dev eth0 root handle 1: htb",
-			"tc class add dev eth0 parent 1: classid 1:1 htb rate 1000Mbps",
-		}
+// Rules generate the rules associated to the node. It relies on the mapping
+// provided to associate a node with an IP.
+func (t Topology) Rules(node Node, mapping map[Node]string) []RuleJSON {
+	rules := make([]RuleJSON, 0)
+	for _, link := range t.links[node] {
+		ip := mapping[link.Distant]
 
-		for i, link := range links {
-			minor := (i + 1) * 10
-			dst := ips[link.Distant]
-
-			cmds = append(
-				cmds,
-				fmt.Sprintf("tc class add dev eth0 parent 1:1 classid 1:%d htb rate 1000Mbps", minor),
-				fmt.Sprintf("tc qdisc add dev eth0 parent 1:%d handle %d: netem delay %dms", minor, minor+1, link.Delay),
-				fmt.Sprintf("tc filter add dev eth0 protocol ip parent 1:0 prio 1 u32 match ip dst %s/32 flowid 1:%d", dst, minor),
-			)
-		}
-
-		rules[node] = cmds
+		rules = append(rules, RuleJSON{Delay: NewDelayRule(ip, link.Delay)})
 	}
 
 	return rules

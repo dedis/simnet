@@ -1,5 +1,7 @@
 FROM alpine
 
+LABEL maintainer="DEDIS <dedis@epfl.ch>"
+
 EXPOSE 1194/udp
 
 VOLUME [ "/etc/openvpn" ]
