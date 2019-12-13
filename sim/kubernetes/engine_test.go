@@ -339,13 +339,13 @@ func TestEngine_ReadStats(t *testing.T) {
 		fs: &testFS{},
 	}
 
-	stats, err := engine.ReadStats("pod-name")
+	stats, err := engine.ReadStats("pod-name", time.Now(), time.Now())
 	require.NoError(t, err)
 	require.NotNil(t, stats)
 
 	e := errors.New("oops")
 	engine.fs = &testFS{err: e}
-	_, err = engine.ReadStats("pod-name")
+	_, err = engine.ReadStats("pod-name", time.Now(), time.Now())
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }

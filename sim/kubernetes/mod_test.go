@@ -269,7 +269,7 @@ func (te *testEngine) WaitDeletion(watch.Interface, time.Duration) error {
 	return te.errWaitDeletion
 }
 
-func (te *testEngine) ReadStats(string) (metrics.NodeStats, error) {
+func (te *testEngine) ReadStats(string, time.Time, time.Time) (metrics.NodeStats, error) {
 	return metrics.NodeStats{}, nil
 }
 

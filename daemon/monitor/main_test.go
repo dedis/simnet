@@ -36,6 +36,17 @@ func TestMain_Run(t *testing.T) {
 	require.Contains(t, string(content), ",0,0,0\n")
 }
 
+func TestMain_RunFailures(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expect a panic")
+		}
+	}()
+
+	os.Args = []string{os.Args[0], "-output", ""}
+	main()
+}
+
 func TestMain_StopSignal(t *testing.T) {
 	monitorFactory = makeTestMonitor
 

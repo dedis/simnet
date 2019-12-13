@@ -2,6 +2,7 @@ package main
 
 import (
 	"regexp"
+	"sort"
 
 	"go.dedis.ch/simnet/metrics"
 	"gonum.org/v1/plot"
@@ -56,8 +57,16 @@ func newUsagePlot(tx, rx, cpu, mem bool) usagePlot {
 // Process takes the statistics and produce the plot that will contain only the
 // lines defined by the list of mappers.
 func (p usagePlot) Process(stats *metrics.Stats) (*plot.Plot, error) {
+	keys := make([]string, 0, len(stats.Nodes))
+	for key := range stats.Nodes {
+		keys = append(keys, key)
+	}
+
+	sort.Strings(keys)
+
 	lines := make([]interface{}, 0)
-	for node, ns := range stats.Nodes {
+	for _, node := range keys {
+		ns := stats.Nodes[node]
 		label := p.regex.FindString(node)
 
 		for prefix, m := range p.mappers {

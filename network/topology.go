@@ -33,8 +33,8 @@ type Topology struct {
 	links map[Node][]Link
 }
 
-// NewSimpleTopology creates a simple topology where every link between two
-// nodes has a small delay.
+// NewSimpleTopology creates a simple topology with a delay for traffic going
+// to node0.
 func NewSimpleTopology(n int, delay time.Duration) Topology {
 	n = int(math.Min(MaxSize, math.Max(0, float64(n))))
 
@@ -53,7 +53,6 @@ func NewSimpleTopology(n int, delay time.Duration) Topology {
 				{
 					Distant: t.nodes[0],
 					Delay:   Delay{Value: delay},
-					Loss:    Loss{Value: 0.05},
 				},
 			}
 		}

@@ -5,6 +5,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Stats represents the JSON structure of the statistics written for each node.
@@ -24,7 +25,7 @@ type NodeStats struct {
 }
 
 // NewNodeStats creates statistics for a node by reading the reader line by line.
-func NewNodeStats(reader io.Reader) NodeStats {
+func NewNodeStats(reader io.Reader, start, end time.Time) NodeStats {
 	ns := NodeStats{}
 
 	scanner := bufio.NewScanner(reader)
@@ -33,11 +34,15 @@ func NewNodeStats(reader io.Reader) NodeStats {
 		numbers := parseLine(line)
 
 		if len(numbers) >= 5 {
-			ns.Timestamps = append(ns.Timestamps, int64(numbers[0]))
-			ns.RxBytes = append(ns.RxBytes, numbers[1])
-			ns.TxBytes = append(ns.TxBytes, numbers[2])
-			ns.CPU = append(ns.CPU, numbers[3])
-			ns.Memory = append(ns.Memory, numbers[4])
+			ts := int64(numbers[0])
+
+			if ts >= start.Unix() && ts <= end.Unix() {
+				ns.Timestamps = append(ns.Timestamps, ts)
+				ns.RxBytes = append(ns.RxBytes, numbers[1])
+				ns.TxBytes = append(ns.TxBytes, numbers[2])
+				ns.CPU = append(ns.CPU, numbers[3])
+				ns.Memory = append(ns.Memory, numbers[4])
+			}
 		}
 	}
 

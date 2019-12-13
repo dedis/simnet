@@ -3,6 +3,7 @@ package metrics
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ func TestStats_NodeStats(t *testing.T) {
 	lines := []byte(testLines)
 	reader := bytes.NewReader(lines)
 
-	ns := NewNodeStats(reader)
+	ns := NewNodeStats(reader, time.Unix(0, 0), time.Unix(1, 0))
 	require.NotNil(t, ns)
 	require.Equal(t, 2, len(ns.Timestamps))
 }

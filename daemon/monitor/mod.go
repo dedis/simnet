@@ -64,6 +64,7 @@ func (m *defaultMonitor) Start() error {
 
 	go func() {
 		for {
+			// TODO: improve the closing
 			err = dec.Decode(data)
 			if err != nil {
 				fmt.Printf("Error: %+v\n", err)

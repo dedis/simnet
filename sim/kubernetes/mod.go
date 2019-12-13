@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.dedis.ch/simnet/metrics"
+	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
@@ -16,7 +17,8 @@ import (
 
 // Options contains the different options for a simulation execution.
 type Options struct {
-	files map[interface{}]FileMapper
+	files    map[interface{}]FileMapper
+	topology network.Topology
 }
 
 // NewOptions creates empty options.
@@ -27,6 +29,10 @@ func NewOptions(opts []Option) *Options {
 
 	for _, f := range opts {
 		f(o)
+	}
+
+	if o.topology.Len() == 0 {
+		o.topology = network.NewSimpleTopology(3, 0)
 	}
 
 	return o
@@ -55,6 +61,14 @@ func WithFileMapper(key FilesKey, fm FileMapper) Option {
 	}
 }
 
+// WithTopology is an option for simulation engines to use the topology when
+// deploying the nodes.
+func WithTopology(topo network.Topology) Option {
+	return func(opts *Options) {
+		opts.topology = topo
+	}
+}
+
 // Strategy is a simulation strategy that will deploy simulation nodes on Kubernetes.
 type Strategy struct {
 	engine      engine
@@ -68,6 +82,8 @@ type Strategy struct {
 
 // NewStrategy creates a new simulation engine.
 func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
+	options := NewOptions(opts)
+
 	config, err := clientcmd.BuildConfigFromFlags("", cfg)
 	if err != nil {
 		return nil, fmt.Errorf("config: %v", err)
@@ -78,7 +94,7 @@ func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 		nodes[i] = fmt.Sprintf("node%d", i)
 	}
 
-	engine, err := newKubeDeployer(config, "default", nodes)
+	engine, err := newKubeDeployer(config, "default", options.topology)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +102,7 @@ func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 	return &Strategy{
 		engine:    engine,
 		namespace: "default",
-		options:   NewOptions(opts),
+		options:   options,
 	}, nil
 }
 
@@ -190,7 +206,7 @@ func (s *Strategy) WriteStats(filepath string) error {
 	}
 
 	for _, pod := range s.pods {
-		ns, err := s.engine.ReadStats(pod.Name)
+		ns, err := s.engine.ReadStats(pod.Name, s.executeTime, s.doneTime)
 		if err != nil {
 			return err
 		}

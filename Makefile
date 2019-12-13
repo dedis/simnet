@@ -1,5 +1,7 @@
+EXAMPLE ?= status
+
 run:
-	go run ./examples/status.go
+	go run ./examples/${EXAMPLE}/main.go
 
 plot:
 	go run ./metrics/plotter/ ${ARGS}

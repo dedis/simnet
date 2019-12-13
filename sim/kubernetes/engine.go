@@ -76,7 +76,7 @@ type engine interface {
 	InitVPN() (sim.Tunnel, error)
 	DeleteAll() (watch.Interface, error)
 	WaitDeletion(watch.Interface, time.Duration) error
-	ReadStats(pod string) (metrics.NodeStats, error)
+	ReadStats(pod string, start, end time.Time) (metrics.NodeStats, error)
 	ReadFile(pod, path string) (io.Reader, error)
 }
 
@@ -90,7 +90,7 @@ type kubeEngine struct {
 	pods      []apiv1.Pod
 }
 
-func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeEngine, error) {
+func newKubeDeployer(config *rest.Config, ns string, topo network.Topology) (*kubeEngine, error) {
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("client: %v", err)
@@ -98,7 +98,7 @@ func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeEngin
 
 	return &kubeEngine{
 		writer:    os.Stdout,
-		topology:  network.NewSimpleTopology(5, 200*time.Millisecond),
+		topology:  topo,
 		namespace: ns,
 		config:    config,
 		client:    client,
@@ -388,13 +388,13 @@ func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) err
 	}
 }
 
-func (kd *kubeEngine) ReadStats(pod string) (metrics.NodeStats, error) {
+func (kd *kubeEngine) ReadStats(pod string, start, end time.Time) (metrics.NodeStats, error) {
 	reader, err := kd.fs.Read(pod, "monitor", "/root/data")
 	if err != nil {
 		return metrics.NodeStats{}, err
 	}
 
-	ns := metrics.NewNodeStats(reader)
+	ns := metrics.NewNodeStats(reader, start, end)
 
 	return ns, nil
 }
