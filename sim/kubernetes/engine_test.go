@@ -160,7 +160,7 @@ func TestEngine_UploadConfig(t *testing.T) {
 		defer wg.Done()
 		dec := json.NewDecoder(engine.fs.(*testFS).reader)
 
-		var rules []network.RuleJSON
+		var rules []network.Rule
 		err := dec.Decode(&rules)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(rules))

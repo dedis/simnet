@@ -2,7 +2,13 @@ package network
 
 import (
 	"fmt"
+	"math"
 	"time"
+)
+
+const (
+	// MaxSize is the maximum size allowed for a topology.
+	MaxSize = 5000
 )
 
 // Node is a peer of the topology.
@@ -16,8 +22,8 @@ func (n Node) String() string {
 // of the link like a delay or a percentage of loss.
 type Link struct {
 	Distant Node
-	Delay   time.Duration
-	Loss    float64
+	Delay   Delay
+	Loss    Loss
 }
 
 // Topology represents a network map where the links between nodes have defined
@@ -30,6 +36,8 @@ type Topology struct {
 // NewSimpleTopology creates a simple topology where every link between two
 // nodes has a small delay.
 func NewSimpleTopology(n int, delay time.Duration) Topology {
+	n = int(math.Min(MaxSize, math.Max(0, float64(n))))
+
 	t := Topology{
 		nodes: make([]Node, n),
 		links: make(map[Node][]Link),
@@ -42,7 +50,11 @@ func NewSimpleTopology(n int, delay time.Duration) Topology {
 
 		if i != 0 {
 			t.links[key] = []Link{
-				{Distant: t.nodes[0], Delay: 200 * time.Millisecond, Loss: 0},
+				{
+					Distant: t.nodes[0],
+					Delay:   Delay{Value: delay},
+					Loss:    Loss{Value: 0.05},
+				},
 			}
 		}
 	}
@@ -62,18 +74,16 @@ func (t Topology) GetNodes() []Node {
 
 // Rules generate the rules associated to the node. It relies on the mapping
 // provided to associate a node with an IP.
-func (t Topology) Rules(node Node, mapping map[Node]string) []RuleJSON {
-	rules := make([]RuleJSON, 0)
+func (t Topology) Rules(node Node, mapping map[Node]string) []Rule {
+	rules := make([]Rule, 0)
 	for _, link := range t.links[node] {
 		ip := mapping[link.Distant]
 
-		if link.Delay > 0 {
-			rules = append(rules, RuleJSON{Delay: NewDelayRule(ip, link.Delay)})
-		}
-
-		if link.Loss > 0 {
-			rules = append(rules, RuleJSON{Loss: NewLossRule(ip, link.Loss)})
-		}
+		rules = append(rules, Rule{
+			IP:    ip,
+			Delay: link.Delay,
+			Loss:  link.Loss,
+		})
 	}
 
 	return rules

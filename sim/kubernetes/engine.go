@@ -98,7 +98,7 @@ func newKubeDeployer(config *rest.Config, ns string, nodes []string) (*kubeEngin
 
 	return &kubeEngine{
 		writer:    os.Stdout,
-		topology:  network.NewSimpleTopology(5, 50*time.Millisecond),
+		topology:  network.NewSimpleTopology(5, 200*time.Millisecond),
 		namespace: ns,
 		config:    config,
 		client:    client,

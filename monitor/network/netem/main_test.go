@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.dedis.ch/simnet/monitor/network"
 )
 
 func TestMain(t *testing.T) {
@@ -27,7 +26,7 @@ func TestMain(t *testing.T) {
 	os.Args = []string{os.Args[0], "-cmd", "echo", "-input", file.Name(), "-log", log.Name()}
 
 	enc := json.NewEncoder(file)
-	err = enc.Encode(testMakeJSON())
+	err = enc.Encode(testMakeRules())
 	require.NoError(t, err)
 
 	main()
@@ -62,20 +61,4 @@ func TestMain_BadInput(t *testing.T) {
 	// Nothing inside the file thus the decoding should fail..
 
 	main()
-}
-
-func testMakeJSON() *[]network.RuleJSON {
-	rules := make([]network.RuleJSON, 0)
-	for _, r := range testMakeRules() {
-		switch rule := r.(type) {
-		case *network.DelayRule:
-			rules = append(rules, network.RuleJSON{Delay: rule})
-		case *network.LossRule:
-			rules = append(rules, network.RuleJSON{Loss: rule})
-		default:
-			panic("not supported")
-		}
-	}
-
-	return &rules
 }

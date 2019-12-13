@@ -49,7 +49,7 @@ func main() {
 
 	dec := json.NewDecoder(reader)
 
-	var data []network.RuleJSON
+	var data []network.Rule
 	err = dec.Decode(&data)
 	checkErr(err, "couldn't decode")
 
@@ -60,22 +60,8 @@ func main() {
 		out: log,
 	}
 
-	err = exec.Execute(buildRules(data))
+	err = exec.Execute(data)
 	checkErr(err, "couldn't execute the rules")
 
 	fmt.Fprintln(log, "Applying the rules to the network manager... Done")
-}
-
-func buildRules(data []network.RuleJSON) []network.Rule {
-	rules := make([]network.Rule, 0, len(data))
-
-	for _, rule := range data {
-		if rule.Delay != nil {
-			rules = append(rules, rule.Delay)
-		} else if rule.Loss != nil {
-			rules = append(rules, rule.Loss)
-		}
-	}
-
-	return rules
 }

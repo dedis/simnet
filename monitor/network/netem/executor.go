@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"math"
 	"os/exec"
 	"strings"
 
@@ -30,8 +29,7 @@ func (e executor) Execute(rules []network.Rule) error {
 	// correctly.
 	commands = append(commands, e.makeRoot(), e.makeParent())
 
-	// Then create a path for each target (single IP or a range) that can contain
-	// up to 10 queueing discplines. (by id construction).
+	// Then create a path for each target (single IP or a range).
 	classes := make(map[string]int)
 	for _, rule := range rules {
 		m := rule.MatchAddr()
@@ -49,13 +47,6 @@ func (e executor) Execute(rules []network.Rule) error {
 				// Attach the first queuing discpline (delay, loss, etc...).
 				e.makeQDisc(minor, classes[m], rule),
 			)
-		} else {
-			commands = append(
-				commands,
-				e.makeChildQDisc(classes[m], classes[m]+1, rule),
-			)
-
-			classes[m]++
 		}
 	}
 
@@ -105,20 +96,8 @@ func (e executor) makeQDisc(minor, major int, rule network.Rule) []string {
 	return strings.Split(cmd, " ")
 }
 
-func (e executor) makeChildQDisc(parent, child int, rule network.Rule) []string {
-	cmd := fmt.Sprintf("qdisc add dev %s parent %d: handle %d: %s", e.dev, parent, child, makeNetEm(rule))
-	return strings.Split(cmd, " ")
-}
-
 func makeNetEm(rule network.Rule) string {
-	switch r := rule.(type) {
-	case *network.DelayRule:
-		return fmt.Sprintf("netem delay %dms", r.Delay.Milliseconds())
-	case *network.LossRule:
-		return fmt.Sprintf("netem loss %d%%", int(math.Round(r.Loss*100)))
-	default:
-		return ""
-	}
+	return strings.Trim(fmt.Sprintf("netem %s %s", rule.Delay, rule.Loss), " ")
 }
 
 func (e executor) makeFilter(ip string, minor int) []string {

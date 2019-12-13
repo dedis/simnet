@@ -42,31 +42,23 @@ func TestExecutor_ExecuteFailure(t *testing.T) {
 	require.Contains(t, err.Error(), " command failed:")
 }
 
-func TestExecutor_MakeNetEm(t *testing.T) {
-	str := makeNetEm(network.NewDelayRule("1.2.3.4", time.Millisecond))
-	require.Equal(t, "netem delay 1ms", str)
-
-	str = makeNetEm(&network.SingleAddrRule{})
-	require.Equal(t, "", str)
-}
-
 var testExpectedCommands = []string{
+	// Root
 	"qdisc add dev eth0 root handle 1: htb",
 	"class add dev eth0 parent 1: classid 1:1 htb rate 1000Mbps",
-	// First ip with one qdisc
+	// First
 	"class add dev eth0 parent 1:1 classid 1:10 htb rate 1000Mbps",
 	"filter add dev eth0 protocol ip parent 1:0 prio 1 u32 match ip dst 127.0.0.1/32 flowid 1:10",
 	"qdisc add dev eth0 parent 1:10 handle 11: netem delay 1000ms",
-	// Second with two qdisc
+	// Second
 	"class add dev eth0 parent 1:1 classid 1:20 htb rate 1000Mbps",
 	"filter add dev eth0 protocol ip parent 1:0 prio 1 u32 match ip dst 127.0.0.2/32 flowid 1:20",
 	"qdisc add dev eth0 parent 1:20 handle 21: netem delay 1000ms",
-	"qdisc add dev eth0 parent 21: handle 22: netem delay 1000ms",
-	// Third with again one qdisc.
+	// Third
 	"class add dev eth0 parent 1:1 classid 1:30 htb rate 1000Mbps",
 	"filter add dev eth0 protocol ip parent 1:0 prio 1 u32 match ip dst 127.0.0.3/32 flowid 1:30",
-	"qdisc add dev eth0 parent 1:30 handle 31: netem loss 50%",
-	// Fourth with one qdisc.
+	"qdisc add dev eth0 parent 1:30 handle 31: netem  loss 50.00%",
+	// Fourth
 	"class add dev eth0 parent 1:1 classid 1:40 htb rate 1000Mbps",
 	"filter add dev eth0 protocol ip parent 1:0 prio 1 u32 match ip dst 127.0.0.4/32 flowid 1:40",
 	"qdisc add dev eth0 parent 1:40 handle 41: netem delay 1000ms",

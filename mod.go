@@ -22,12 +22,12 @@ func (s *Simulation) Run() (err error) {
 		return
 	}
 
-	// defer func() {
-	// 	errClean := s.strategy.Clean()
-	// 	if errClean != nil {
-	// 		err = errClean
-	// 	}
-	// }()
+	defer func() {
+		errClean := s.strategy.Clean()
+		if errClean != nil {
+			err = errClean
+		}
+	}()
 
 	err = s.strategy.Execute(s.round)
 	if err != nil {
