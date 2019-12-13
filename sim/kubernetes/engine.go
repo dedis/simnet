@@ -199,7 +199,9 @@ func (kd *kubeEngine) UploadConfig() error {
 	}
 
 	for _, pod := range kd.pods {
-		writer, _, err := kd.fs.Write(pod.Name, "monitor", []string{"sh", "-c", "./netem -"})
+		// Logs are written in the stdout of the main process so we get the
+		// logs from the Kubernetes drivers.
+		writer, _, err := kd.fs.Write(pod.Name, "monitor", []string{"sh", "-c", "./netem -log /proc/1/fd/1 -"})
 		if err != nil {
 			return err
 		}

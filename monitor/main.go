@@ -70,8 +70,6 @@ func main() {
 			checkErr(err)
 			err = writer.Flush()
 			checkErr(err)
-
-			fmt.Printf("[%d]: %s\n", ts, stats.Name)
 		}
 	}
 }

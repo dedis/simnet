@@ -15,17 +15,19 @@ func NewSimulation(r sim.Round, e sim.Strategy) *Simulation {
 
 // Run uses the round interface to run the simulation.
 func (s *Simulation) Run() (err error) {
+	// TODO: flagset for options.
+
 	err = s.strategy.Deploy()
 	if err != nil {
 		return
 	}
 
-	defer func() {
-		errClean := s.strategy.Clean()
-		if errClean != nil {
-			err = errClean
-		}
-	}()
+	// defer func() {
+	// 	errClean := s.strategy.Clean()
+	// 	if errClean != nil {
+	// 		err = errClean
+	// 	}
+	// }()
 
 	err = s.strategy.Execute(s.round)
 	if err != nil {

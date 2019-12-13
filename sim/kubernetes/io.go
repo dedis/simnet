@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 
@@ -89,7 +90,7 @@ func (fs kfs) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan
 			Container: container,
 			Command:   cmd,
 			Stdin:     true,
-			Stdout:    true,
+			Stdout:    false,
 			Stderr:    true,
 			TTY:       false,
 		}, scheme.ParameterCodec)
@@ -100,15 +101,18 @@ func (fs kfs) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan
 	}
 
 	done := make(chan error, 1)
-	out := new(bytes.Buffer)
+	errOut := new(bytes.Buffer)
 
 	go func() {
 		err = exec.Stream(remotecommand.StreamOptions{
 			Stdin:  reader,
-			Stdout: out,
-			Stderr: out,
+			Stderr: errOut,
 			Tty:    false,
 		})
+
+		if err != nil {
+			err = fmt.Errorf("%s: %s", err.Error(), errOut)
+		}
 
 		done <- err
 	}()

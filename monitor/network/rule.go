@@ -13,13 +13,13 @@ type Rule interface {
 // SingleAddrRule implements the rule interface. It will match a single
 // IP.
 type SingleAddrRule struct {
-	ip string
+	IP string
 }
 
 // MatchAddr returns the match value for the IP of the rule and uses the mask
 // 255.255.255.255 so that it only matches this one.
 func (r SingleAddrRule) MatchAddr() string {
-	return fmt.Sprintf("%s/32", r.ip)
+	return fmt.Sprintf("%s/32", r.IP)
 }
 
 // DelayRule extends the single address rule by adding values required to
@@ -35,7 +35,7 @@ type DelayRule struct {
 // apply. The leeway will be zero thus creating a constant delay.
 func NewDelayRule(ip string, delay time.Duration) *DelayRule {
 	return &DelayRule{
-		SingleAddrRule: SingleAddrRule{ip: ip},
+		SingleAddrRule: SingleAddrRule{IP: ip},
 		Delay:          delay,
 		Leeway:         0,
 	}
@@ -54,7 +54,7 @@ type LossRule struct {
 // packets to drop.
 func NewLossRule(ip string, loss float64) *LossRule {
 	return &LossRule{
-		SingleAddrRule: SingleAddrRule{ip: ip},
+		SingleAddrRule: SingleAddrRule{IP: ip},
 		Loss:           loss,
 	}
 }

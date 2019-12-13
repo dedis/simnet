@@ -75,6 +75,8 @@ func (e executor) execTc(args []string) error {
 	cmd.Stderr = e.out
 	cmd.Stdout = e.out
 
+	fmt.Fprintln(e.out, cmd.String())
+
 	err := cmd.Run()
 	if err != nil {
 		return fmt.Errorf("cmd failed: %s", err)

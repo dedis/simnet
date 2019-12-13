@@ -24,6 +24,7 @@ func TestExecutor_Execute(t *testing.T) {
 
 	scanner := bufio.NewScanner(out)
 	for _, cmd := range testExpectedCommands {
+		require.True(t, scanner.Scan()) // ignore the log
 		require.True(t, scanner.Scan())
 		require.Equal(t, cmd, scanner.Text())
 	}
@@ -45,7 +46,7 @@ func TestExecutor_MakeNetEm(t *testing.T) {
 	str := makeNetEm(network.NewDelayRule("1.2.3.4", time.Millisecond))
 	require.Equal(t, "netem delay 1ms", str)
 
-	str = makeNetEm(network.SingleAddrRule{})
+	str = makeNetEm(&network.SingleAddrRule{})
 	require.Equal(t, "", str)
 }
 

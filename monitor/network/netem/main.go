@@ -4,10 +4,21 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	"go.dedis.ch/simnet/monitor/network"
+)
+
+const (
+	// DefaultNetworkDevice is the name of the network device to apply the
+	// topology emulation.
+	DefaultNetworkDevice = "eth0"
+	// DefaultCommand is the location of the command to use for emulation.
+	DefaultCommand = "tc"
+	// DefaultInput is an empty string to use the standard input.
+	DefaultInput = ""
+	// DefaultLogFile is the file where to write the logs.
+	DefaultLogFile = "/dev/null"
 )
 
 func checkErr(err error, msg string) {
@@ -18,19 +29,18 @@ func checkErr(err error, msg string) {
 
 func main() {
 	flagset := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	dev := flagset.String("dev", "eth0", "network device to target")
-	cmd := flagset.String("cmd", "tc", "tc command location")
-	input := flagset.String("input", "", "input to decode to rules")
-	verbose := flagset.Bool("verbose", false, "display logs")
+	dev := flagset.String("dev", DefaultNetworkDevice, "network device to target")
+	cmd := flagset.String("cmd", DefaultCommand, "tc command location")
+	input := flagset.String("input", DefaultInput, "input to decode to rules")
+	logpath := flagset.String("log", DefaultLogFile, "file to write the logs")
 
 	flagset.Parse(os.Args[1:])
 
-	out := ioutil.Discard
-	if *verbose {
-		out = os.Stdout
-	}
+	log, err := os.Create(*logpath)
+	checkErr(err, "couldn't create or open the logging file")
 
-	var err error
+	defer log.Close()
+
 	reader := os.Stdin
 	if *input != "" {
 		reader, err = os.Open(*input)
@@ -43,17 +53,17 @@ func main() {
 	err = dec.Decode(&data)
 	checkErr(err, "couldn't decode")
 
-	fmt.Fprintln(out, "Applying the rules to the network manager...")
+	fmt.Fprintln(log, "Applying rules to the network manager...")
 	exec := executor{
 		dev: *dev,
 		cmd: *cmd,
-		out: out,
+		out: log,
 	}
 
 	err = exec.Execute(buildRules(data))
 	checkErr(err, "couldn't execute the rules")
 
-	fmt.Fprintln(out, "Applying the rules to the network manager... Done")
+	fmt.Fprintln(log, "Applying the rules to the network manager... Done")
 }
 
 func buildRules(data []network.RuleJSON) []network.Rule {

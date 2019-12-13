@@ -42,7 +42,7 @@ func NewSimpleTopology(n int, delay time.Duration) Topology {
 
 		if i != 0 {
 			t.links[key] = []Link{
-				{Distant: t.nodes[0], Delay: 200, Loss: 0},
+				{Distant: t.nodes[0], Delay: 200 * time.Millisecond, Loss: 0},
 			}
 		}
 	}
@@ -67,7 +67,13 @@ func (t Topology) Rules(node Node, mapping map[Node]string) []RuleJSON {
 	for _, link := range t.links[node] {
 		ip := mapping[link.Distant]
 
-		rules = append(rules, RuleJSON{Delay: NewDelayRule(ip, link.Delay)})
+		if link.Delay > 0 {
+			rules = append(rules, RuleJSON{Delay: NewDelayRule(ip, link.Delay)})
+		}
+
+		if link.Loss > 0 {
+			rules = append(rules, RuleJSON{Loss: NewLossRule(ip, link.Loss)})
+		}
 	}
 
 	return rules

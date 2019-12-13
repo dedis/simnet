@@ -6,7 +6,8 @@ plot:
 
 clean:
 	kubectl delete deployments -l go.dedis.ch.app=simnet \
-	&& kubectl delete service simnet-router
+	&& kubectl delete service simnet-router \
+	&& killall openvpn
 
 build_monitor:
 	docker build -t dedis/simnet-monitor -f monitor/Dockerfile .
