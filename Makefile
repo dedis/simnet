@@ -10,8 +10,8 @@ clean:
 	&& killall openvpn
 
 build_monitor:
-	docker build -t dedis/simnet-monitor -f monitor/Dockerfile .
+	docker build -t dedis/simnet-monitor -f daemon/monitor/Dockerfile .
 
 build_router:
-	docker build -t dedis/simnet-router-init -f router/Init.Dockerfile .
-	docker build -t dedis/simnet-router -f router/Dockerfile .
+	docker build -t dedis/simnet-router-init -f daemon/router/Init.Dockerfile .
+	docker build -t dedis/simnet-router -f daemon/router/Dockerfile .

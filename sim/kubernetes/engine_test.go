@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.dedis.ch/simnet/monitor/network"
+	"go.dedis.ch/simnet/network"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

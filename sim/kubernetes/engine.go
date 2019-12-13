@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"go.dedis.ch/simnet/metrics"
-	"go.dedis.ch/simnet/monitor/network"
+	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
 
 	"github.com/buger/goterm"

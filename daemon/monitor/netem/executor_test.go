@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.dedis.ch/simnet/monitor/network"
+	"go.dedis.ch/simnet/network"
 )
 
 func TestExecutor_Execute(t *testing.T) {

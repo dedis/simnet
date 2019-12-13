@@ -9,8 +9,8 @@ VOLUME ["/etc/openvpn"]
 RUN apk add --no-cache easy-rsa
 
 WORKDIR /app
-COPY ./router/init.sh .
+COPY ./daemon/router/init.sh .
 # TODO: generate it instead
-COPY ./router/dh.pem .
+COPY ./daemon/router/dh.pem .
 
 ENTRYPOINT [ "./init.sh" ]

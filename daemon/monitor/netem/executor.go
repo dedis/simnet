@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"go.dedis.ch/simnet/monitor/network"
+	"go.dedis.ch/simnet/network"
 )
 
 // Executor is responsible for executing the commands necessary to apply the

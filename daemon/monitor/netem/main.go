@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"go.dedis.ch/simnet/monitor/network"
+	"go.dedis.ch/simnet/network"
 )
 
 const (
