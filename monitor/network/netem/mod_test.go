@@ -17,7 +17,7 @@ func TestMain(t *testing.T) {
 	defer file.Close()
 	defer os.Remove(file.Name())
 
-	os.Args = append(os.Args[:0], "--cmd", "echo", "--input", file.Name())
+	os.Args = []string{os.Args[0], "-cmd", "echo", "-input", file.Name()}
 
 	enc := json.NewEncoder(file)
 	err = enc.Encode(testMakeJSON())
@@ -41,7 +41,7 @@ func TestMain_BadInput(t *testing.T) {
 	defer file.Close()
 	defer os.Remove(file.Name())
 
-	os.Args = append(os.Args[:0], "--verbose", "--input", file.Name())
+	os.Args = []string{os.Args[0], "--verbose", "--input", file.Name()}
 
 	// Nothing inside the file thus the decoding should fail..
 

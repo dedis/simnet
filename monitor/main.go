@@ -27,7 +27,8 @@ func main() {
 	flagset := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	name := flagset.String("container", "", "container name prefix")
 	output := flagset.String("output", MeasureFileName, "output file")
-	flagset.Parse(os.Args)
+
+	flagset.Parse(os.Args[1:])
 
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT)

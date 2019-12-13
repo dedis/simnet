@@ -23,7 +23,7 @@ func main() {
 	input := flagset.String("input", "", "input to decode to rules")
 	verbose := flagset.Bool("verbose", false, "display logs")
 
-	flagset.Parse(os.Args)
+	flagset.Parse(os.Args[1:])
 
 	out := ioutil.Discard
 	if *verbose {

@@ -24,11 +24,16 @@ func TestMain_Run(t *testing.T) {
 
 	f, err := ioutil.TempFile(os.TempDir(), "monitor")
 	require.NoError(t, err)
+
 	f.Close()
 	defer os.Remove(f.Name())
 
 	os.Args = []string{os.Args[0], "-output", f.Name()}
 	main()
+
+	content, err := ioutil.ReadFile(f.Name())
+	require.NoError(t, err)
+	require.Contains(t, string(content), ",0,0,0\n")
 }
 
 func TestMain_StopSignal(t *testing.T) {
