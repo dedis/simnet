@@ -287,7 +287,7 @@ func (te *testEngine) CreateDeployment(container apiv1.Container) (watch.Interfa
 	return watch.NewFake(), te.errDeployment
 }
 
-func (te *testEngine) WaitDeployment(watch.Interface, time.Duration) error {
+func (te *testEngine) WaitDeployment(watch.Interface) error {
 	return te.errWaitDeployment
 }
 

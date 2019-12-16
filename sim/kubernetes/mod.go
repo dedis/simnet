@@ -196,7 +196,7 @@ func (s *Strategy) Deploy() error {
 		return err
 	}
 
-	err = s.engine.WaitDeployment(w, 300*time.Second)
+	err = s.engine.WaitDeployment(w)
 	w.Stop()
 	if err != nil {
 		return err

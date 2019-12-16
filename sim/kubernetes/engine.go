@@ -72,7 +72,7 @@ var (
 
 type engine interface {
 	CreateDeployment(container apiv1.Container) (watch.Interface, error)
-	WaitDeployment(watch.Interface, time.Duration) error
+	WaitDeployment(watch.Interface) error
 	FetchPods() ([]apiv1.Pod, error)
 	UploadConfig() error
 	DeployRouter([]apiv1.Pod) (watch.Interface, error)
@@ -146,28 +146,29 @@ func (kd kubeEngine) CreateDeployment(container apiv1.Container) (watch.Interfac
 	return w, nil
 }
 
-func (kd *kubeEngine) WaitDeployment(w watch.Interface, timeout time.Duration) error {
-	// TODO: check for errors and failed deployment
+func (kd *kubeEngine) WaitDeployment(w watch.Interface) error {
 	fmt.Fprint(kd.writer, "Waiting deployment...")
 	readyMap := make(map[string]struct{})
-	tick := time.After(timeout)
 
 	for {
-		select {
-		case <-tick:
-			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... failed"))
-			return errors.New("timeout")
-		case evt := <-w.ResultChan():
-			dpl := evt.Object.(*appsv1.Deployment)
+		// Deployments will time out if one of them has not progressed
+		// in a given amount of time.
+		evt := <-w.ResultChan()
+		dpl := evt.Object.(*appsv1.Deployment)
 
-			if dpl.Status.AvailableReplicas > 0 {
-				readyMap[dpl.Name] = struct{}{}
-			}
+		if dpl.Status.AvailableReplicas > 0 {
+			readyMap[dpl.Name] = struct{}{}
+		}
 
-			if len(readyMap) == kd.topology.Len() {
-				fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... ok"))
-				return nil
-			}
+		if len(readyMap) == kd.topology.Len() {
+			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... ok"))
+			return nil
+		}
+
+		hasFailure, reason := checkPodFailure(dpl)
+		if hasFailure {
+			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... failure"))
+			return errors.New(reason)
 		}
 	}
 }
@@ -176,7 +177,6 @@ func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 	fmt.Fprintf(kd.writer, "Fetching pods...")
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
-		// TODO: fetch ready
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, AppID),
 	})
 
@@ -459,6 +459,7 @@ func makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
+			ProgressDeadlineSeconds: int32Ptr(30),
 			Template: apiv1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,

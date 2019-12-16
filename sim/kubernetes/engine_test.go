@@ -95,16 +95,34 @@ func TestEngine_WaitDeployment(t *testing.T) {
 		})
 	}
 
-	require.NoError(t, engine.WaitDeployment(w, testTimeout))
+	require.NoError(t, engine.WaitDeployment(w))
 }
 
 func TestEngine_WaitDeploymentFailure(t *testing.T) {
-	engine, _ := makeEngine(0)
+	engine, _ := makeEngine(3)
 
-	w := watch.NewFake()
-	err := engine.WaitDeployment(w, time.Millisecond)
+	reason := "oops"
+
+	w := watch.NewFakeWithChanSize(1, false)
+	w.Modify(&appsv1.Deployment{
+		Status: appsv1.DeploymentStatus{
+			Conditions: []appsv1.DeploymentCondition{
+				{
+					Type:   appsv1.DeploymentAvailable,
+					Status: apiv1.ConditionFalse,
+				},
+				{
+					Type:   appsv1.DeploymentProgressing,
+					Status: apiv1.ConditionFalse,
+					Reason: reason,
+				},
+			},
+		},
+	})
+
+	err := engine.WaitDeployment(w)
 	require.Error(t, err)
-	require.Equal(t, "timeout", err.Error())
+	require.Equal(t, reason, err.Error())
 }
 
 func TestEngine_FetchPods(t *testing.T) {
