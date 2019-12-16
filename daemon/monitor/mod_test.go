@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	dockerapi "github.com/docker/docker/client"
@@ -79,6 +80,34 @@ func TestMonitor_StartErrorStats(t *testing.T) {
 	err := monitor.Start()
 	require.Error(t, err)
 	require.Equal(t, e, err)
+}
+
+func TestMonitor_StartStreamError(t *testing.T) {
+	reader, writer := io.Pipe()
+
+	monitor := newMonitor("bob")
+	monitor.clientFactory = func() (dockerapi.APIClient, error) {
+		return &testDockerClient{reader: reader}, nil
+	}
+
+	err := monitor.Start()
+	require.NoError(t, err)
+
+	writer.Close()
+
+	done := make(chan struct{})
+	go func() {
+		// Because the error should have closed the go routines, it
+		// should not wait thus not time out.
+		monitor.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
 }
 
 func TestMonitor_CloseError(t *testing.T) {
