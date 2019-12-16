@@ -6,7 +6,7 @@ import (
 
 // Round is executed during the simulation.
 type Round interface {
-	Execute(ctx context.Context)
+	Execute(ctx context.Context) error
 }
 
 // Strategy provides the primitives to run a simulation from the

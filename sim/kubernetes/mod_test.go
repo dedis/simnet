@@ -375,10 +375,12 @@ type testRound struct {
 	h func(context.Context)
 }
 
-func (tr testRound) Execute(ctx context.Context) {
+func (tr testRound) Execute(ctx context.Context) error {
 	if tr.h != nil {
 		tr.h(ctx)
 	}
+
+	return nil
 }
 
 type testVPN struct {

@@ -284,7 +284,10 @@ func (s *Strategy) Execute(round sim.Round) error {
 
 	s.executeTime = time.Now()
 
-	round.Execute(ctx)
+	err = round.Execute(ctx)
+	if err != nil {
+		return err
+	}
 
 	s.doneTime = time.Now()
 

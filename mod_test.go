@@ -11,7 +11,9 @@ import (
 
 type testRound struct{}
 
-func (t testRound) Execute(ctx context.Context) {}
+func (t testRound) Execute(ctx context.Context) error {
+	return nil
+}
 
 type testStrategy struct {
 	errDeploy  error

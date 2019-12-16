@@ -22,7 +22,7 @@ import (
 
 type skipchainSimulationRound struct{}
 
-func (r skipchainSimulationRound) Execute(ctx context.Context) {
+func (r skipchainSimulationRound) Execute(ctx context.Context) error {
 	files := ctx.Value(kubernetes.FilesKey("private.toml")).(map[string]interface{})
 	idents := make([]*network.ServerIdentity, 0, len(files))
 
@@ -37,7 +37,7 @@ func (r skipchainSimulationRound) Execute(ctx context.Context) {
 	client := skipchain.NewClient()
 	genesis, err := client.CreateGenesis(ro, 4, 32, skipchain.VerificationStandard, []byte("deadbeef"))
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	fmt.Printf("Genesis block %x created with roster %v.\n", genesis.Hash, genesis.Roster.List)
@@ -49,13 +49,14 @@ func (r skipchainSimulationRound) Execute(ctx context.Context) {
 		binary.LittleEndian.PutUint64(data, uint64(i))
 		_, err := client.StoreSkipBlock(genesis, ro, data)
 		if err != nil {
-			panic(err)
+			return err
 		}
 
 		fmt.Printf(goterm.ResetLine("Block [%d/%d] created"), i+1, n)
 	}
 
 	fmt.Println("")
+	return nil
 }
 
 func main() {

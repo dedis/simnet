@@ -22,7 +22,7 @@ import (
 type StatusSimulationRound struct{}
 
 // Execute will contact each known node and ask for its status.
-func (r StatusSimulationRound) Execute(ctx context.Context) {
+func (r StatusSimulationRound) Execute(ctx context.Context) error {
 	files := ctx.Value(kubernetes.FilesKey("private.toml")).(map[string]interface{})
 	idents := make([]*network.ServerIdentity, 0, len(files))
 
@@ -44,13 +44,14 @@ func (r StatusSimulationRound) Execute(ctx context.Context) {
 		fmt.Printf(goterm.ResetLine("Checking connectivity... [%d/%d]"), i+1, len(idents))
 		_, err := client.CheckConnectivity(ro[0].GetPrivate(), ro, 5*time.Second, true)
 		if err != nil {
-			fmt.Printf("Error: %+v\n", err)
+			return err
 		}
 
 		time.Sleep(1 * time.Second)
 	}
 
 	fmt.Println(goterm.ResetLine("Checking connectivity... ok"))
+	return nil
 }
 
 func main() {
