@@ -30,6 +30,16 @@ const (
 	// MessageInitDone is the message to look for to assume the tunnel is
 	// opened.
 	MessageInitDone = "Initialization Sequence Completed"
+
+	// FileNameCA is the name of the file where the public key of the CA will
+	// be written.
+	FileNameCA = "ca.crt"
+	// FileNameCert is the name of the file where the public of the client
+	// will be written.
+	FileNameCert = "client.crt"
+	// FileNameKey is the name of the file where the private key of the client
+	// will be written.
+	FileNameKey = "client.key"
 )
 
 // Tunnel provides primitives to open and close a tunnel to a private network.
@@ -89,17 +99,17 @@ func NewDefaultTunnel(opts ...TunOption) (*DefaultTunnel, error) {
 		return nil, err
 	}
 
-	err = writeFile(options.CA, "ca.crt", dir)
+	err = writeFile(options.CA, FileNameCA, dir)
 	if err != nil {
 		return nil, err
 	}
 
-	err = writeFile(options.Key, "client1.key", dir)
+	err = writeFile(options.Key, FileNameKey, dir)
 	if err != nil {
 		return nil, err
 	}
 
-	err = writeFile(options.Cert, "client1.crt", dir)
+	err = writeFile(options.Cert, FileNameCert, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -137,18 +147,18 @@ func (v *DefaultTunnel) Start() error {
 		"--dev",
 		"tun",
 		"--ca",
-		filepath.Join(v.dir, "ca.crt"),
+		filepath.Join(v.dir, FileNameCA),
 		"--cert",
-		filepath.Join(v.dir, "client1.crt"),
+		filepath.Join(v.dir, FileNameCert),
 		"--key",
-		filepath.Join(v.dir, "client1.key"),
+		filepath.Join(v.dir, FileNameKey),
 		"--proto",
 		"udp",
 		"--remote",
 		v.host,
 		"--port",
 		"1194",
-		"--ns-cert-type", // TODO: deprecated
+		"--remote-cert-tls",
 		"server",
 		"--nobind",
 		"--persist-key",

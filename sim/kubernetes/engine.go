@@ -302,7 +302,7 @@ func (kd *kubeEngine) InitVPN() (sim.Tunnel, error) {
 	readers := make([]io.Reader, 3)
 
 	for i, file := range files {
-		r, err := kd.fs.Read(router.Name, "router", file)
+		r, err := kd.fs.Read(router.Name, ContainerRouterName, file)
 		if err != nil {
 			return nil, err
 		}
@@ -401,7 +401,7 @@ func (kd *kubeEngine) ReadStats(pod string, start, end time.Time) (metrics.NodeS
 }
 
 func (kd *kubeEngine) ReadFile(pod, path string) (io.Reader, error) {
-	return kd.fs.Read(pod, "app", path)
+	return kd.fs.Read(pod, ContainerAppName, path)
 }
 
 func int32Ptr(v int32) *int32 {
@@ -433,7 +433,7 @@ func makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
 					Containers: []apiv1.Container{
 						container,
 						{
-							Name:            "monitor",
+							Name:            ContainerMonitorName,
 							Image:           "dedis/simnet-monitor:latest",
 							ImagePullPolicy: "Never", // TODO: Remove after the image is pushed to DockerHub.
 							Args: []string{
@@ -517,7 +517,7 @@ func makeRouterDeployment() *appsv1.Deployment {
 					},
 					Containers: []apiv1.Container{
 						{
-							Name:            "router",
+							Name:            ContainerRouterName,
 							Image:           "dedis/simnet-router:latest",
 							ImagePullPolicy: "Never", // TODO: Remove after the image is pushed to DockerHub.
 							Ports: []apiv1.ContainerPort{
