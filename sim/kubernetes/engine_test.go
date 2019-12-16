@@ -15,6 +15,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -35,8 +36,10 @@ func TestEngine_CreateDeployments(t *testing.T) {
 
 	for i := 0; i < n; i++ {
 		select {
-		case <-w.ResultChan():
-			// TODO: check deployment
+		case evt := <-w.ResultChan():
+			dpl, ok := evt.Object.(*appsv1.Deployment)
+			require.True(t, ok)
+			require.Equal(t, 2, len(dpl.Spec.Template.Spec.Containers))
 		case <-time.After(testTimeout):
 			t.Fatal("timeout")
 		}
@@ -148,14 +151,17 @@ func TestEngine_FetchPods(t *testing.T) {
 }
 
 func TestEngine_FetchPodsFailure(t *testing.T) {
-	engine, client := makeEngine(0)
+	engine, client := makeEngine(1)
+
+	_, err := engine.FetchPods()
+	require.Error(t, err)
 
 	e := errors.New("list error")
 	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
 		return true, nil, e
 	})
 
-	_, err := engine.FetchPods()
+	_, err = engine.FetchPods()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }
@@ -188,6 +194,33 @@ func TestEngine_UploadConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	wg.Wait()
+}
+
+func TestEngine_UploadConfigFailures(t *testing.T) {
+	engine, _ := makeEngine(1)
+	engine.pods = []apiv1.Pod{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					LabelNode: "node1",
+				},
+			},
+		},
+	}
+
+	e := errors.New("writing error")
+	engine.fs = &testFS{err: e}
+
+	err := engine.UploadConfig()
+	require.Error(t, err)
+	require.Equal(t, e, err)
+
+	_, writer := io.Pipe()
+	writer.Close()
+	engine.fs = &testFS{writer: writer}
+	err = engine.UploadConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "io: read/write on closed pipe")
 }
 
 func TestEngine_DeployRouter(t *testing.T) {
@@ -282,6 +315,30 @@ func TestEngine_WaitRouterFailure(t *testing.T) {
 	require.Equal(t, reason, err.Error())
 }
 
+func TestEngine_WaitRouterVPNFailure(t *testing.T) {
+	engine, client := makeEngine(1)
+
+	e := errors.New("create error")
+	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
+		return true, nil, e
+	})
+
+	err := engine.createVPNService()
+	require.Error(t, err)
+	require.Equal(t, e, err)
+
+	w := watch.NewFakeWithChanSize(1, false)
+	w.Modify(&appsv1.Deployment{
+		Status: appsv1.DeploymentStatus{
+			AvailableReplicas: 1,
+		},
+	})
+
+	engine.config.Host = ":"
+	err = engine.WaitRouter(w)
+	require.Error(t, err)
+}
+
 func TestEngine_InitVPN(t *testing.T) {
 	list := &apiv1.PodList{
 		Items: []apiv1.Pod{
@@ -301,6 +358,52 @@ func TestEngine_InitVPN(t *testing.T) {
 	vpn, err := engine.InitVPN()
 	require.NoError(t, err)
 	require.NotNil(t, vpn)
+}
+
+func TestEngine_InitVPNFailures(t *testing.T) {
+	engine, _ := makeEngine(0)
+
+	list := &apiv1.PodList{
+		Items: []apiv1.Pod{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "simnet-router",
+					Labels: map[string]string{LabelID: RouterID},
+				},
+			},
+		},
+	}
+	engine.client = fake.NewSimpleClientset(list)
+
+	// Expect an error when reading the client certificate.
+	e := errors.New("read error")
+	engine.fs = &testFS{err: e}
+	_, err := engine.InitVPN()
+	require.Error(t, err)
+	require.Equal(t, e, err)
+
+	// Expect an error when parsing the host.
+	engine.fs = &testFS{}
+	engine.config.Host = ":"
+	_, err = engine.InitVPN()
+	require.Error(t, err)
+
+	// Expect an error when fetching the router pod.
+	client := fake.NewSimpleClientset()
+	engine.client = client
+	_, err = engine.InitVPN()
+	require.Error(t, err)
+	require.Equal(t, "missing router pod", err.Error())
+
+	// Expect an error when fetching the list of pods.
+	e = errors.New("fetch pod error")
+	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
+		return true, nil, e
+	})
+
+	_, err = engine.InitVPN()
+	require.Error(t, err)
+	require.Equal(t, e, err)
 }
 
 func TestEngine_Delete(t *testing.T) {
@@ -336,8 +439,12 @@ func TestEngine_Delete(t *testing.T) {
 func TestEngine_DeleteFailure(t *testing.T) {
 	engine, client := makeEngine(0)
 
+	client.PrependReactor("*", "services", func(action testcore.Action) (bool, runtime.Object, error) {
+		return true, nil, nil
+	})
+
 	e := errors.New("delete error")
-	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
+	client.PrependReactor("*", "deployments", func(action testcore.Action) (bool, runtime.Object, error) {
 		return true, nil, e
 	})
 
@@ -347,11 +454,17 @@ func TestEngine_DeleteFailure(t *testing.T) {
 
 	fw := watch.NewFake()
 	e = errors.New("watcher error")
-	client.PrependWatchReactor("*", testcore.DefaultWatchReactor(fw, e))
+	client.PrependWatchReactor("deployments", testcore.DefaultWatchReactor(fw, e))
 
 	_, err = engine.DeleteAll()
 	require.Error(t, err)
 	require.Equal(t, e, err)
+
+	engine.client = fake.NewSimpleClientset()
+	_, err = engine.DeleteAll()
+	require.Error(t, err)
+	require.IsType(t, (*apierrors.StatusError)(nil), err)
+
 }
 
 func TestEngine_WaitDeletion(t *testing.T) {

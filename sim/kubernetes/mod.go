@@ -151,6 +151,16 @@ func WithImage(image string, cmd, args []string, ports ...Port) Option {
 	}
 }
 
+// Encoder is the interface used to instantiate the encoder that will write
+// the statistics into a file.
+type Encoder interface {
+	Encode(interface{}) error
+}
+
+func makeJSONEncoder(w io.Writer) Encoder {
+	return json.NewEncoder(w)
+}
+
 // Strategy is a simulation strategy that will deploy simulation nodes on Kubernetes.
 type Strategy struct {
 	engine      engine
@@ -160,6 +170,7 @@ type Strategy struct {
 	tun         sim.Tunnel
 	executeTime time.Time
 	doneTime    time.Time
+	makeEncoder func(io.Writer) Encoder
 }
 
 // NewStrategy creates a new simulation engine.
@@ -182,9 +193,10 @@ func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 	}
 
 	return &Strategy{
-		engine:    engine,
-		namespace: "default",
-		options:   options,
+		engine:      engine,
+		namespace:   "default",
+		options:     options,
+		makeEncoder: makeJSONEncoder,
 	}, nil
 }
 
@@ -301,13 +313,10 @@ func (s *Strategy) WriteStats(filepath string) error {
 		return err
 	}
 
-	enc := json.NewEncoder(f)
-	err = enc.Encode(&stats)
-	if err != nil {
-		return err
-	}
+	defer f.Close()
 
-	err = f.Close()
+	enc := s.makeEncoder(f)
+	err = enc.Encode(&stats)
 	if err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -113,7 +114,15 @@ func TestStrategy_DeployWithFailures(t *testing.T) {
 	err := stry.Deploy()
 	require.NoError(t, err)
 
-	e := errors.New("fetch router error")
+	// Errors are tested in reverse order to avoid to reset err fields
+	// all the time.
+
+	e := errors.New("vpn start error")
+	deployer.errVpn = e
+	err = stry.Deploy()
+	require.Equal(t, e, err)
+
+	e = errors.New("fetch router error")
 	deployer.errFetchRouter = e
 	err = stry.Deploy()
 	require.Equal(t, e, err)
@@ -125,6 +134,11 @@ func TestStrategy_DeployWithFailures(t *testing.T) {
 
 	e = errors.New("deploy router error")
 	deployer.errDeployRouter = e
+	err = stry.Deploy()
+	require.Equal(t, e, err)
+
+	e = errors.New("upload config error")
+	deployer.errUploadConfig = e
 	err = stry.Deploy()
 	require.Equal(t, e, err)
 
@@ -198,7 +212,7 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 
 	stry := &Strategy{
 		pods:    []apiv1.Pod{{}},
-		engine:  &testEngine{errReadFromPod: e},
+		engine:  &testEngine{errRead: e},
 		options: NewOptions(options),
 	}
 
@@ -215,8 +229,9 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 func TestStrategy_WriteStats(t *testing.T) {
 	reader, writer := io.Pipe()
 	stry := &Strategy{
-		pods:   []apiv1.Pod{{}},
-		engine: &testEngine{reader: reader},
+		pods:        []apiv1.Pod{{}},
+		engine:      &testEngine{reader: reader},
+		makeEncoder: makeJSONEncoder,
 	}
 
 	// Get a temporary file path.
@@ -233,6 +248,33 @@ func TestStrategy_WriteStats(t *testing.T) {
 
 	_, err = os.Stat(filepath)
 	require.NoError(t, err)
+}
+
+func TestStrategy_WriteStatsFailures(t *testing.T) {
+	e := errors.New("read stats error")
+	stry := &Strategy{
+		pods:   []apiv1.Pod{{}},
+		engine: &testEngine{errRead: e},
+	}
+
+	err := stry.WriteStats("")
+	require.Error(t, err)
+	require.Equal(t, e, err)
+
+	stry.engine = &testEngine{}
+
+	err = stry.WriteStats("")
+	require.Error(t, err)
+	require.IsType(t, (*os.PathError)(nil), err)
+
+	dir, err := ioutil.TempDir(os.TempDir(), "simnet-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	stry.makeEncoder = newBadEncoder
+	err = stry.WriteStats(filepath.Join(dir, "data"))
+	require.Error(t, err)
+	require.Equal(t, "encoding error", err.Error())
 }
 
 func TestStrategy_Clean(t *testing.T) {
@@ -275,12 +317,14 @@ type testEngine struct {
 	errDeployment     error
 	errWaitDeployment error
 	errFetchPods      error
+	errUploadConfig   error
 	errDeployRouter   error
 	errWaitRouter     error
 	errFetchRouter    error
 	errDeleteAll      error
 	errWaitDeletion   error
-	errReadFromPod    error
+	errRead           error
+	errVpn            error
 }
 
 func (te *testEngine) CreateDeployment(container apiv1.Container) (watch.Interface, error) {
@@ -296,7 +340,7 @@ func (te *testEngine) FetchPods() ([]apiv1.Pod, error) {
 }
 
 func (te *testEngine) UploadConfig() error {
-	return nil
+	return te.errUploadConfig
 }
 
 func (te *testEngine) DeployRouter([]apiv1.Pod) (watch.Interface, error) {
@@ -308,7 +352,7 @@ func (te *testEngine) WaitRouter(watch.Interface) error {
 }
 
 func (te *testEngine) InitVPN() (sim.Tunnel, error) {
-	return testVPN{}, te.errFetchRouter
+	return testVPN{err: te.errVpn}, te.errFetchRouter
 }
 
 func (te *testEngine) DeleteAll() (watch.Interface, error) {
@@ -320,11 +364,11 @@ func (te *testEngine) WaitDeletion(watch.Interface, time.Duration) error {
 }
 
 func (te *testEngine) ReadStats(string, time.Time, time.Time) (metrics.NodeStats, error) {
-	return metrics.NodeStats{}, nil
+	return metrics.NodeStats{}, te.errRead
 }
 
 func (te *testEngine) ReadFile(string, string) (io.Reader, error) {
-	return te.reader, te.errReadFromPod
+	return te.reader, te.errRead
 }
 
 type testRound struct {
@@ -337,14 +381,16 @@ func (tr testRound) Execute(ctx context.Context) {
 	}
 }
 
-type testVPN struct{}
+type testVPN struct {
+	err error
+}
 
 func (v testVPN) Start() error {
-	return nil
+	return v.err
 }
 
 func (v testVPN) Stop() error {
-	return nil
+	return v.err
 }
 
 type testTunnel struct {
@@ -357,4 +403,14 @@ func (t testTunnel) Start() error {
 
 func (t testTunnel) Stop() error {
 	return t.err
+}
+
+type testBadEncoder struct{}
+
+func newBadEncoder(io.Writer) Encoder {
+	return testBadEncoder{}
+}
+
+func (e testBadEncoder) Encode(interface{}) error {
+	return errors.New("encoding error")
 }

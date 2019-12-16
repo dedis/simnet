@@ -299,7 +299,7 @@ func (kd *kubeEngine) InitVPN() (sim.Tunnel, error) {
 	}
 
 	if len(pods.Items) != 1 {
-		return nil, errors.New("invalid number of pods")
+		return nil, errors.New("missing router pod")
 	}
 
 	router := pods.Items[0]

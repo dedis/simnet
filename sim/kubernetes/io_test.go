@@ -85,6 +85,20 @@ func TestIO_WriteFailure(t *testing.T) {
 	_, _, err := fs.Write("", "", []string{})
 	require.Error(t, err)
 	require.Equal(t, e, err)
+
+	fs = kfs{
+		restclient: &restfake.RESTClient{},
+		makeExecutor: func(u *url.URL) (remotecommand.Executor, error) {
+			return testFailingExecutorFactory(u)
+		},
+	}
+
+	_, done, err := fs.Write("", "", []string{})
+	require.NoError(t, err)
+
+	err = <-done
+	require.Error(t, err)
+	require.Equal(t, "command failed: stream error", err.Error())
 }
 
 type fakeExecutor struct {
