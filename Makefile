@@ -7,9 +7,9 @@ plot:
 	go run ./metrics/plotter/ ${ARGS}
 
 clean:
-	kubectl delete deployments -l go.dedis.ch.app=simnet \
-	&& kubectl delete service simnet-router \
-	&& killall openvpn
+	killall openvpn || true
+	kubectl delete deployments -l go.dedis.ch.app=simnet || true
+	kubectl delete service simnet-router || true
 
 build_monitor:
 	docker build -t dedis/simnet-monitor -f daemon/monitor/Dockerfile .

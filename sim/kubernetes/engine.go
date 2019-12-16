@@ -39,6 +39,10 @@ const (
 
 	// LabelNode is attached to the node identifier in the topology.
 	LabelNode = "go.dedis.ch.node.id"
+
+	// TimeoutRouterDeployment is the amount time in seconds that the router
+	// has to progress to full availability.
+	TimeoutRouterDeployment = 15
 )
 
 var (
@@ -260,19 +264,26 @@ func (kd *kubeEngine) createVPNService() error {
 
 func (kd *kubeEngine) WaitRouter(w watch.Interface) error {
 	fmt.Fprintf(kd.writer, "Waiting for the router...")
+
 	for {
-		select {
-		// TODO: timeout
-		case evt := <-w.ResultChan():
-			dpl := evt.Object.(*appsv1.Deployment)
-			if dpl.Status.AvailableReplicas > 0 {
-				fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... ok"))
-				err := kd.createVPNService()
-				if err != nil {
-					return err
-				}
-				return nil
+		// Deployment will time out after some time if it has not
+		// progressed.
+		evt := <-w.ResultChan()
+		dpl := evt.Object.(*appsv1.Deployment)
+
+		if dpl.Status.AvailableReplicas > 0 {
+			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... ok"))
+			err := kd.createVPNService()
+			if err != nil {
+				return err
 			}
+			return nil
+		}
+
+		hasFailure, reason := checkPodFailure(dpl)
+		if hasFailure {
+			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... failure"))
+			return errors.New(reason)
 		}
 	}
 }
@@ -404,6 +415,29 @@ func (kd *kubeEngine) ReadFile(pod, path string) (io.Reader, error) {
 	return kd.fs.Read(pod, ContainerAppName, path)
 }
 
+func checkPodFailure(dpl *appsv1.Deployment) (bool, string) {
+	isAvailable := true
+	isProgressing := true
+	reason := ""
+
+	for _, c := range dpl.Status.Conditions {
+		// A deployment failure is detected when the progression has stopped
+		// but the availability status failed to be true.
+		if c.Type == appsv1.DeploymentProgressing && c.Status == apiv1.ConditionFalse {
+			isProgressing = false
+			reason = c.Reason
+		}
+
+		if c.Type == appsv1.DeploymentAvailable && c.Status == apiv1.ConditionFalse {
+			// We announce the failure and return the reason why the progression
+			// has stopped.
+			isAvailable = false
+		}
+	}
+
+	return !isAvailable && !isProgressing, reason
+}
+
 func int32Ptr(v int32) *int32 {
 	return &v
 }
@@ -495,6 +529,7 @@ func makeRouterDeployment() *appsv1.Deployment {
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
+			ProgressDeadlineSeconds: int32Ptr(TimeoutRouterDeployment),
 			Template: apiv1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,

@@ -237,6 +237,33 @@ func TestEngine_WaitRouter(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestEngine_WaitRouterFailure(t *testing.T) {
+	engine := newKubeEngineTest(fake.NewSimpleClientset(), "", 0)
+
+	reason := "oops"
+
+	w := watch.NewFakeWithChanSize(1, false)
+	w.Modify(&appsv1.Deployment{
+		Status: appsv1.DeploymentStatus{
+			Conditions: []appsv1.DeploymentCondition{
+				{
+					Type:   appsv1.DeploymentAvailable,
+					Status: apiv1.ConditionFalse,
+				},
+				{
+					Type:   appsv1.DeploymentProgressing,
+					Status: apiv1.ConditionFalse,
+					Reason: reason,
+				},
+			},
+		},
+	})
+
+	err := engine.WaitRouter(w)
+	require.Error(t, err)
+	require.Equal(t, reason, err.Error())
+}
+
 func TestEngine_InitVPN(t *testing.T) {
 	list := &apiv1.PodList{
 		Items: []apiv1.Pod{
