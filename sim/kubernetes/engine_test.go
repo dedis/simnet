@@ -29,7 +29,7 @@ func TestEngine_CreateDeployments(t *testing.T) {
 	n := 3
 	engine, client := makeEngine(n)
 
-	w, err := engine.CreateDeployment()
+	w, err := engine.CreateDeployment(apiv1.Container{})
 	require.NoError(t, err)
 	defer w.Stop()
 
@@ -64,7 +64,7 @@ func TestEngine_CreateDeploymentFailure(t *testing.T) {
 	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
 		return true, nil, e
 	})
-	_, err := engine.CreateDeployment()
+	_, err := engine.CreateDeployment(apiv1.Container{})
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
@@ -73,7 +73,7 @@ func TestEngine_CreateDeploymentFailure(t *testing.T) {
 	e = errors.New("watcher error")
 	client.PrependWatchReactor("*", testcore.DefaultWatchReactor(fw, e))
 
-	_, err = engine.CreateDeployment()
+	_, err = engine.CreateDeployment(apiv1.Container{})
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }

@@ -61,30 +61,38 @@ func (r skipchainSimulationRound) Execute(ctx context.Context) {
 func main() {
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
-	files := kubernetes.WithFileMapper(
-		kubernetes.FilesKey("private.toml"),
-		kubernetes.FileMapper{
-			Path: "/root/.config/conode/private.toml",
-			Mapper: func(r io.Reader) (interface{}, error) {
-				hc := &app.CothorityConfig{}
-				_, err := toml.DecodeReader(r, hc)
-				if err != nil {
-					return nil, err
-				}
+	options := []kubernetes.Option{
+		kubernetes.WithFileMapper(
+			kubernetes.FilesKey("private.toml"),
+			kubernetes.FileMapper{
+				Path: "/root/.config/conode/private.toml",
+				Mapper: func(r io.Reader) (interface{}, error) {
+					hc := &app.CothorityConfig{}
+					_, err := toml.DecodeReader(r, hc)
+					if err != nil {
+						return nil, err
+					}
 
-				si, err := hc.GetServerIdentity()
-				if err != nil {
-					return nil, err
-				}
+					si, err := hc.GetServerIdentity()
+					if err != nil {
+						return nil, err
+					}
 
-				return si, nil
+					return si, nil
+				},
 			},
-		},
-	)
+		),
+		kubernetes.WithTopology(net.NewSimpleTopology(10, 50*time.Millisecond)),
+		kubernetes.WithImage(
+			"dedis/conode:latest",
+			[]string{"bash", "-c"},
+			[]string{"/root/conode setup --non-interactive --port 7770 && /root/conode -d 2 server"},
+			kubernetes.NewTCP(7770),
+			kubernetes.NewTCP(7771),
+		),
+	}
 
-	topo := kubernetes.WithTopology(net.NewSimpleTopology(10, 50*time.Millisecond))
-
-	engine, err := kubernetes.NewStrategy(kubeconfig, files, topo)
+	engine, err := kubernetes.NewStrategy(kubeconfig, options...)
 	if err != nil {
 		panic(err)
 	}

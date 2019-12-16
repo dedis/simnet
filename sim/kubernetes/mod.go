@@ -15,10 +15,23 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+const (
+	// ContainerAppName is the name of the container where the application
+	// will be deployed.
+	ContainerAppName = "app"
+	// ContainerMonitorName is the name of the container where the monitor
+	// will be deployed.
+	ContainerMonitorName = "monitor"
+	// ContainerRouterName is the name of the container where the router
+	// will be deployed.
+	ContainerRouterName = "router"
+)
+
 // Options contains the different options for a simulation execution.
 type Options struct {
-	files    map[interface{}]FileMapper
-	topology network.Topology
+	files     map[interface{}]FileMapper
+	topology  network.Topology
+	container apiv1.Container
 }
 
 // NewOptions creates empty options.
@@ -69,6 +82,75 @@ func WithTopology(topo network.Topology) Option {
 	}
 }
 
+// Port is a parameter for the container image to open a port with a given
+// protocol. It can also be a range.
+type Port interface {
+	asContainerPort() apiv1.ContainerPort
+}
+
+// TCP is a single TCP port.
+type TCP struct {
+	port int32
+}
+
+// NewTCP creates a new tcp port.
+func NewTCP(port int32) TCP {
+	return TCP{port: port}
+}
+
+func (tcp TCP) asContainerPort() apiv1.ContainerPort {
+	return apiv1.ContainerPort{
+		Protocol:      apiv1.ProtocolTCP,
+		ContainerPort: tcp.port,
+	}
+}
+
+// UDP is a single udp port.
+type UDP struct {
+	port int32
+}
+
+// NewUDP creates a new udp port.
+func NewUDP(port int32) UDP {
+	return UDP{port: port}
+}
+
+func (udp UDP) asContainerPort() apiv1.ContainerPort {
+	return apiv1.ContainerPort{
+		Protocol:      apiv1.ProtocolUDP,
+		ContainerPort: udp.port,
+	}
+}
+
+// WithImage is an option for simulation engines to use this Docker image as
+// the base application to run.
+func WithImage(image string, cmd, args []string, ports ...Port) Option {
+	pp := make([]apiv1.ContainerPort, len(ports))
+	for i, port := range ports {
+		pp[i] = port.asContainerPort()
+	}
+
+	return func(opts *Options) {
+		opts.container = apiv1.Container{
+			Name:    ContainerAppName,
+			Image:   image,
+			Command: cmd,
+			Args:    args,
+			Ports:   pp,
+			Resources: apiv1.ResourceRequirements{
+				Requests: apiv1.ResourceList{
+					"memory": AppRequestMemory,
+					"cpu":    AppRequestCPU,
+				},
+				Limits: apiv1.ResourceList{
+					"memory": AppLimitMemory,
+					"cpu":    AppLimitCPU,
+				},
+			},
+		}
+	}
+}
+
 // Strategy is a simulation strategy that will deploy simulation nodes on Kubernetes.
 type Strategy struct {
 	engine      engine
@@ -109,7 +191,7 @@ func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 // Deploy will create a deployment on the Kubernetes cluster. A pod will then
 // be assigned to simulation nodes.
 func (s *Strategy) Deploy() error {
-	w, err := s.engine.CreateDeployment()
+	w, err := s.engine.CreateDeployment(s.options.container)
 	if err != nil {
 		return err
 	}

@@ -67,7 +67,7 @@ var (
 )
 
 type engine interface {
-	CreateDeployment() (watch.Interface, error)
+	CreateDeployment(container apiv1.Container) (watch.Interface, error)
 	WaitDeployment(watch.Interface, time.Duration) error
 	FetchPods() ([]apiv1.Pod, error)
 	UploadConfig() error
@@ -112,7 +112,7 @@ func newKubeDeployer(config *rest.Config, ns string, topo network.Topology) (*ku
 	}, nil
 }
 
-func (kd kubeEngine) CreateDeployment() (watch.Interface, error) {
+func (kd kubeEngine) CreateDeployment(container apiv1.Container) (watch.Interface, error) {
 	fmt.Fprint(kd.writer, "Creating deployment...")
 
 	intf := kd.client.AppsV1().Deployments(kd.namespace)
@@ -129,7 +129,7 @@ func (kd kubeEngine) CreateDeployment() (watch.Interface, error) {
 	}
 
 	for _, node := range kd.topology.GetNodes() {
-		deployment := makeDeployment(node.String())
+		deployment := makeDeployment(node.String(), container)
 
 		_, err = intf.Create(deployment)
 		if err != nil {
@@ -143,6 +143,7 @@ func (kd kubeEngine) CreateDeployment() (watch.Interface, error) {
 }
 
 func (kd *kubeEngine) WaitDeployment(w watch.Interface, timeout time.Duration) error {
+	// TODO: check for errors and failed deployment
 	fmt.Fprint(kd.writer, "Waiting deployment...")
 	readyMap := make(map[string]struct{})
 	tick := time.After(timeout)
@@ -407,7 +408,7 @@ func int32Ptr(v int32) *int32 {
 	return &v
 }
 
-func makeDeployment(node string) *appsv1.Deployment {
+func makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
 	labels := map[string]string{
 		LabelApp:  AppName,
 		LabelID:   AppID,
@@ -430,34 +431,7 @@ func makeDeployment(node string) *appsv1.Deployment {
 				},
 				Spec: apiv1.PodSpec{
 					Containers: []apiv1.Container{
-						{
-							Name:  "app",
-							Image: "dedis/conode:latest",
-							Ports: []apiv1.ContainerPort{
-								{
-									Protocol:      apiv1.ProtocolTCP,
-									ContainerPort: 7770,
-								},
-								{
-									Protocol:      apiv1.ProtocolTCP,
-									ContainerPort: 7771,
-								},
-							},
-							Command: []string{"/bin/sh", "-c"},
-							Args: []string{
-								"/root/conode setup --non-interactive --port 7770 && /root/conode -d 2 server",
-							},
-							Resources: apiv1.ResourceRequirements{
-								Requests: apiv1.ResourceList{
-									"memory": AppRequestMemory,
-									"cpu":    AppRequestCPU,
-								},
-								Limits: apiv1.ResourceList{
-									"memory": AppLimitMemory,
-									"cpu":    AppLimitCPU,
-								},
-							},
-						},
+						container,
 						{
 							Name:            "monitor",
 							Image:           "dedis/simnet-monitor:latest",

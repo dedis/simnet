@@ -64,6 +64,7 @@ The simulation is now ready to be run.
 ```bash
 cd $SIMNET_DIR
 make EXAMPLE="skipchain" run # be patient, time for a coffee !
+# or make run to run the default simulation.
 
 # In case the simulation fails and cannot clean the cluster correctly, you
 # can force the deletion.

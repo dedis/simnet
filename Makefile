@@ -1,4 +1,4 @@
-EXAMPLE ?= status
+EXAMPLE ?= skipchain
 
 run:
 	go run ./examples/${EXAMPLE}/main.go
