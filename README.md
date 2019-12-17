@@ -1,5 +1,26 @@
 # Simnet
 
+## Status
+
+![Travis (.com)](https://img.shields.io/travis/com/dedis/simnet)
+
+### Daemons
+
+#### SimNet router
+
+![Docker Cloud Automated build](https://img.shields.io/docker/cloud/automated/dedis/simnet-router)
+![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router)
+
+#### SimNet router initialization
+
+![Docker Cloud Automated build](https://img.shields.io/docker/cloud/automated/dedis/simnet-router-init)
+![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router-init)
+
+#### SimNet monitor
+
+![Docker Cloud Automated build](https://img.shields.io/docker/cloud/automated/dedis/simnet-monitor)
+![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-monitor)
+
 Simnet is a tool to simulate a decentralized application using the cloud to
 host the simulation nodes. It provides multiple configurations to affect the
 topology so that specific link between two nodes can have a delay or a loss
