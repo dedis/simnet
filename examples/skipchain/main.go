@@ -83,7 +83,12 @@ func main() {
 				},
 			},
 		),
-		kubernetes.WithTopology(net.NewSimpleTopology(10, 50*time.Millisecond)),
+		kubernetes.WithTopology(
+			net.NewAreaTopology(
+				&net.Area{N: 1},
+				&net.Area{N: 5, X: 100, Y: 0, Latency: net.Delay{Value: 25 * time.Millisecond}},
+			),
+		),
 		kubernetes.WithImage(
 			"dedis/conode:latest",
 			[]string{"bash", "-c"},

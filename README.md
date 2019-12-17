@@ -2,7 +2,7 @@
 
 ## Status
 
-![Travis (.com)](https://img.shields.io/travis/com/dedis/simnet)
+[![Build Status](https://travis-ci.com/dedis/simnet.svg?token=CiNtvHijgCWZaDxXbhmo&branch=master)](https://travis-ci.com/dedis/simnet)
 
 ### Daemons
 

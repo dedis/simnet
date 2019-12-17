@@ -44,7 +44,7 @@ func NewOptions(opts []Option) *Options {
 		f(o)
 	}
 
-	if o.topology.Len() == 0 {
+	if o.topology == nil {
 		o.topology = network.NewSimpleTopology(3, 0)
 	}
 

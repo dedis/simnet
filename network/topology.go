@@ -26,19 +26,27 @@ type Link struct {
 	Loss    Loss
 }
 
-// Topology represents a network map where the links between nodes have defined
+// Topology provides the primitive to get information about the mapping of
+// multiple nodes connected together and the properties of their links.
+type Topology interface {
+	Len() int
+	GetNodes() []Node
+	Rules(Node, map[Node]string) []Rule
+}
+
+// SimpleTopology represents a network map where the links between nodes have defined
 // properties.
-type Topology struct {
+type SimpleTopology struct {
 	nodes []Node
 	links map[Node][]Link
 }
 
 // NewSimpleTopology creates a simple topology with a delay for traffic going
 // to node0.
-func NewSimpleTopology(n int, delay time.Duration) Topology {
+func NewSimpleTopology(n int, delay time.Duration) SimpleTopology {
 	n = int(math.Min(MaxSize, math.Max(0, float64(n))))
 
-	t := Topology{
+	t := SimpleTopology{
 		nodes: make([]Node, n),
 		links: make(map[Node][]Link),
 	}
@@ -62,18 +70,18 @@ func NewSimpleTopology(n int, delay time.Duration) Topology {
 }
 
 // Len returns the number of nodes in the topology.
-func (t Topology) Len() int {
+func (t SimpleTopology) Len() int {
 	return len(t.nodes)
 }
 
 // GetNodes returns the nodes.
-func (t Topology) GetNodes() []Node {
+func (t SimpleTopology) GetNodes() []Node {
 	return t.nodes
 }
 
 // Rules generate the rules associated to the node. It relies on the mapping
 // provided to associate a node with an IP.
-func (t Topology) Rules(node Node, mapping map[Node]string) []Rule {
+func (t SimpleTopology) Rules(node Node, mapping map[Node]string) []Rule {
 	rules := make([]Rule, 0)
 	for _, link := range t.links[node] {
 		ip := mapping[link.Distant]
