@@ -10,7 +10,6 @@ RUN apk add --no-cache easy-rsa
 
 WORKDIR /app
 COPY ./daemon/router/init.sh .
-# TODO: generate it instead
 COPY ./daemon/router/dh.pem .
 
 ENTRYPOINT [ "./init.sh" ]

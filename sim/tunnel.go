@@ -236,7 +236,8 @@ func writeFile(r io.Reader, name string, dir string) error {
 		return errors.New("missing certificate reader")
 	}
 
-	f, err := os.Create(filepath.Join(dir, name))
+	// Create a file that can be read only by the user.
+	f, err := os.OpenFile(filepath.Join(dir, name), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
