@@ -73,6 +73,7 @@ func NewAreaTopology(areas ...*Area) *AreaTopology {
 	return t
 }
 
+// Len returns the number of nodes inside the topology.
 func (t *AreaTopology) Len() int {
 	n := 0
 	for _, area := range t.areas {
@@ -81,6 +82,7 @@ func (t *AreaTopology) Len() int {
 	return n
 }
 
+// GetNodes returns the list of identifiers for the nodes.
 func (t *AreaTopology) GetNodes() []Node {
 	nodes := make([]Node, 0)
 	for _, area := range t.areas {
@@ -92,6 +94,7 @@ func (t *AreaTopology) GetNodes() []Node {
 	return nodes
 }
 
+// Rules returns the list of rules for a given node in the topology.
 func (t *AreaTopology) Rules(target Node, mapping map[Node]string) []Rule {
 	for _, area := range t.areas {
 		for node, links := range area.nodes {

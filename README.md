@@ -1,5 +1,15 @@
 # Simnet
 
+Simnet is a tool to simulate a decentralized application using the cloud to
+host the simulation nodes. It provides multiple configurations to affect the
+topology so that specific link between two nodes can have a delay or a loss
+of packets.
+
+TODO: extend the doc
+
+Important: not all Docker images are deployed so it cannot currently be run
+on a live cluster.
+
 ## Status
 
 [![Build Status](https://travis-ci.com/dedis/simnet.svg?token=CiNtvHijgCWZaDxXbhmo&branch=master)](https://travis-ci.com/dedis/simnet)
@@ -20,16 +30,6 @@
 
 ![Docker Cloud Automated build](https://img.shields.io/docker/cloud/automated/dedis/simnet-monitor)
 ![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-monitor)
-
-Simnet is a tool to simulate a decentralized application using the cloud to
-host the simulation nodes. It provides multiple configurations to affect the
-topology so that specific link between two nodes can have a delay or a loss
-of packets.
-
-TODO: extend the doc
-
-Important: not all Docker images are deployed so it cannot currently be run
-on a live cluster.
 
 ## Engines
 
