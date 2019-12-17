@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"go.dedis.ch/simnet/daemon"
 	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
@@ -40,9 +41,12 @@ const (
 	// LabelNode is attached to the node identifier in the topology.
 	LabelNode = "go.dedis.ch.node.id"
 
-	// TimeoutRouterDeployment is the amount time in seconds that the router
+	// TimeoutRouterDeployment is the amount of time in seconds that the router
 	// has to progress to full availability.
-	TimeoutRouterDeployment = 15
+	TimeoutRouterDeployment = 300
+	// TimeoutAppDeployment is the amount of time in seconds that the app
+	// has to progress to full availability.
+	TimeoutAppDeployment = 300
 )
 
 var (
@@ -459,7 +463,7 @@ func makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
-			ProgressDeadlineSeconds: int32Ptr(30),
+			ProgressDeadlineSeconds: int32Ptr(TimeoutAppDeployment),
 			Template: apiv1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
@@ -468,9 +472,9 @@ func makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
 					Containers: []apiv1.Container{
 						container,
 						{
-							Name:            ContainerMonitorName,
-							Image:           "dedis/simnet-monitor:latest",
-							ImagePullPolicy: "Never", // TODO: Remove after the image is pushed to DockerHub.
+							Name:  ContainerMonitorName,
+							Image: fmt.Sprintf("dedis/simnet-monitor:%s", daemon.Version),
+							// ImagePullPolicy: "Never",
 							Args: []string{
 								"--container",
 								"simnet-" + node,
@@ -540,9 +544,9 @@ func makeRouterDeployment() *appsv1.Deployment {
 						// The initialization container will generate the
 						// different keys that will be used for the session.
 						{
-							Name:            "router-init",
-							Image:           "dedis/simnet-router-init:latest",
-							ImagePullPolicy: "Never",
+							Name:  "router-init",
+							Image: fmt.Sprintf("dedis/simnet-router-init:%s", daemon.Version),
+							// ImagePullPolicy: "Never",
 							VolumeMounts: []apiv1.VolumeMount{
 								{
 									Name:      "openvpn",
@@ -553,9 +557,9 @@ func makeRouterDeployment() *appsv1.Deployment {
 					},
 					Containers: []apiv1.Container{
 						{
-							Name:            ContainerRouterName,
-							Image:           "dedis/simnet-router:latest",
-							ImagePullPolicy: "Never", // TODO: Remove after the image is pushed to DockerHub.
+							Name:  ContainerRouterName,
+							Image: fmt.Sprintf("dedis/simnet-router:%s", daemon.Version),
+							// ImagePullPolicy: "Never",
 							Ports: []apiv1.ContainerPort{
 								{
 									ContainerPort: 1194,

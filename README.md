@@ -16,6 +16,27 @@ The simulation uses engines to manage the deployment and running of the rounds.
 A kubernetes engine is provided and used by default.
 TODO: Docker engine for local simulations ?
 
+# Versioning
+
+## Tools
+
+The versions follow the semantic versioning syntax to comply with Go modules.
+
+## Daemons
+
+Docker images for the daemons have their own version that will trigger a build
+for each new version. The master branch will also build its own tag for each
+new commit.
+
+Dockerhub is configured to automatically create the following tags:
+- `latest` for the master branch
+- `x.y.z` for each `daemon-vx.y.z` tag on the repository
+
+The build status can be monitored for each daemon:
+- [simnet-router](https://hub.docker.com/repository/docker/dedis/simnet-router/timeline)
+- [simnet-router-init](https://hub.docker.com/repository/docker/dedis/simnet-router-init/timeline)
+- [simnet-monitor](https://hub.docker.com/repository/docker/dedis/simnet-monitor/timeline)
+
 # How to
 
 ## How to simulate with Kubernetes locally ?
@@ -43,7 +64,9 @@ minikube dashboard
 
 ### Build the docker images
 
-TODO: this step won't be necessary anymore after the images are deployed!
+A local change to the daemon images can be used by building the images inside
+minikube and forcing it to use the local ones. You will need to add "Never" for
+the image pull policy in the kubernetes deployments.
 
 ```bash
 # Set the docker environment variables for this session.
