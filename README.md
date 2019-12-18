@@ -12,7 +12,8 @@ on a live cluster.
 
 ## Status
 
-[![Build Status](https://travis-ci.com/dedis/simnet.svg?token=CiNtvHijgCWZaDxXbhmo&branch=master)](https://travis-ci.com/dedis/simnet)
+[![Build Status](https://travis-ci.org/dedis/simnet.svg?branch=master)](https://travis-ci.org/dedis/simnet)
+[![Coverage Status](https://coveralls.io/repos/github/dedis/simnet/badge.svg?branch=master)](https://coveralls.io/github/dedis/simnet?branch=master)
 
 ### Daemons
 
