@@ -3,6 +3,11 @@ language: go
 go:
     - 1.13
 
-script: go mod download && go test ./...
+before_install:
+    - go get github.com/mattn/goveralls
+    - go mod download
+
+script: go test ./... && $GOPATH/bin/goveralls -service=travis-ci
+
 notifications:
     email: false
