@@ -242,9 +242,6 @@ func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
 		return nil, err
 	}
 
-	// TODO: an iptables rule is used to forward the traffic from the user
-	// to the private network as the vpn network is too wide. It would be
-	// better to use the correct mask when initiating the vpn server.
 	_, err = intf.Create(makeRouterDeployment())
 	if err != nil {
 		return nil, err
