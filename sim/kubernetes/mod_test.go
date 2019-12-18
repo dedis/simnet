@@ -347,11 +347,11 @@ func (te *testEngine) DeployRouter([]apiv1.Pod) (watch.Interface, error) {
 	return watch.NewFake(), te.errDeployRouter
 }
 
-func (te *testEngine) WaitRouter(watch.Interface) error {
-	return te.errWaitRouter
+func (te *testEngine) WaitRouter(watch.Interface) (*apiv1.ServicePort, error) {
+	return &apiv1.ServicePort{}, te.errWaitRouter
 }
 
-func (te *testEngine) InitVPN() (sim.Tunnel, error) {
+func (te *testEngine) InitVPN(*apiv1.ServicePort) (sim.Tunnel, error) {
 	return testVPN{err: te.errVpn}, te.errFetchRouter
 }
 

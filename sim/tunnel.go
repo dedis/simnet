@@ -51,6 +51,7 @@ type Tunnel interface {
 // TunOptions contains the data that will be used to start the vpn.
 type TunOptions struct {
 	Host string
+	Port int32
 	CA   io.Reader
 	Key  io.Reader
 	Cert io.Reader
@@ -63,6 +64,13 @@ type TunOption func(opts *TunOptions)
 func WithHost(host string) TunOption {
 	return func(opts *TunOptions) {
 		opts.Host = host
+	}
+}
+
+// WithPort updates the options to include the port of the distant vpn.
+func WithPort(port int32) TunOption {
+	return func(opts *TunOptions) {
+		opts.Port = port
 	}
 }
 
@@ -83,6 +91,7 @@ type DefaultTunnel struct {
 	logFile string
 	pidFile string
 	host    string
+	port    string
 	in      io.ReadCloser
 	timeout time.Duration
 }
@@ -119,6 +128,7 @@ func NewDefaultTunnel(opts ...TunOption) (*DefaultTunnel, error) {
 	return &DefaultTunnel{
 		cmd:     cmd,
 		host:    options.Host,
+		port:    fmt.Sprintf("%d", options.Port),
 		dir:     dir,
 		logFile: filepath.Join(dir, LogFileName),
 		pidFile: filepath.Join(dir, PIDFileName),
@@ -157,7 +167,7 @@ func (v *DefaultTunnel) Start() error {
 		"--remote",
 		v.host,
 		"--port",
-		"1194",
+		v.port,
 		"--remote-cert-tls",
 		"server",
 		"--nobind",

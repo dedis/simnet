@@ -231,13 +231,13 @@ func (s *Strategy) Deploy() error {
 		return err
 	}
 
-	err = s.engine.WaitRouter(w)
+	port, err := s.engine.WaitRouter(w)
 	w.Stop()
 	if err != nil {
 		return err
 	}
 
-	vpn, err := s.engine.InitVPN()
+	vpn, err := s.engine.InitVPN(port)
 	if err != nil {
 		return err
 	}

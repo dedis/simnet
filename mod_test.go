@@ -1,6 +1,7 @@
 package simnet
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -57,6 +58,8 @@ func (e *testStrategy) Clean() error {
 func TestSimulation_Run(t *testing.T) {
 	stry := &testStrategy{}
 	sim := NewSimulation(testRound{}, stry)
+	buffer := new(bytes.Buffer)
+	sim.out = buffer
 
 	require.NoError(t, sim.Run())
 
@@ -80,6 +83,6 @@ func TestSimulation_Run(t *testing.T) {
 	stry.errStats = nil
 	stry.errClean = errors.New("clean")
 	err = sim.Run()
-	require.Error(t, err)
-	require.Equal(t, "clean", err.Error())
+	require.NoError(t, err)
+	require.Contains(t, buffer.String(), "An error occured during cleaning")
 }

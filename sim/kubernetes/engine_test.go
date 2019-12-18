@@ -14,8 +14,8 @@ import (
 	"go.dedis.ch/simnet/network"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -275,7 +275,8 @@ func TestEngine_DeployRouterFailure(t *testing.T) {
 }
 
 func TestEngine_WaitRouter(t *testing.T) {
-	engine := newKubeEngineTest(fake.NewSimpleClientset(), "", 0)
+	client := fake.NewSimpleClientset()
+	engine := newKubeEngineTest(client, "", 0)
 
 	w := watch.NewFakeWithChanSize(1, false)
 	w.Modify(&appsv1.Deployment{
@@ -284,7 +285,11 @@ func TestEngine_WaitRouter(t *testing.T) {
 		},
 	})
 
-	err := engine.WaitRouter(w)
+	fw := watch.NewFakeWithChanSize(1, false)
+	fw.Modify(&apiv1.Service{Spec: apiv1.ServiceSpec{Ports: []apiv1.ServicePort{{NodePort: 31000}}}})
+	client.PrependWatchReactor("services", testcore.DefaultWatchReactor(fw, nil))
+
+	_, err := engine.WaitRouter(w)
 	require.NoError(t, err)
 }
 
@@ -310,7 +315,7 @@ func TestEngine_WaitRouterFailure(t *testing.T) {
 		},
 	})
 
-	err := engine.WaitRouter(w)
+	_, err := engine.WaitRouter(w)
 	require.Error(t, err)
 	require.Equal(t, reason, err.Error())
 }
@@ -323,7 +328,7 @@ func TestEngine_WaitRouterVPNFailure(t *testing.T) {
 		return true, nil, e
 	})
 
-	err := engine.createVPNService()
+	_, err := engine.createVPNService()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
@@ -335,7 +340,7 @@ func TestEngine_WaitRouterVPNFailure(t *testing.T) {
 	})
 
 	engine.config.Host = ":"
-	err = engine.WaitRouter(w)
+	_, err = engine.WaitRouter(w)
 	require.Error(t, err)
 }
 
@@ -355,7 +360,7 @@ func TestEngine_InitVPN(t *testing.T) {
 	}
 	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", 1)
 
-	vpn, err := engine.InitVPN()
+	vpn, err := engine.InitVPN(&apiv1.ServicePort{})
 	require.NoError(t, err)
 	require.NotNil(t, vpn)
 }
@@ -378,20 +383,20 @@ func TestEngine_InitVPNFailures(t *testing.T) {
 	// Expect an error when reading the client certificate.
 	e := errors.New("read error")
 	engine.fs = &testFS{err: e}
-	_, err := engine.InitVPN()
+	_, err := engine.InitVPN(&apiv1.ServicePort{})
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
 	// Expect an error when parsing the host.
 	engine.fs = &testFS{}
 	engine.config.Host = ":"
-	_, err = engine.InitVPN()
+	_, err = engine.InitVPN(&apiv1.ServicePort{})
 	require.Error(t, err)
 
 	// Expect an error when fetching the router pod.
 	client := fake.NewSimpleClientset()
 	engine.client = client
-	_, err = engine.InitVPN()
+	_, err = engine.InitVPN(&apiv1.ServicePort{})
 	require.Error(t, err)
 	require.Equal(t, "missing router pod", err.Error())
 
@@ -401,7 +406,7 @@ func TestEngine_InitVPNFailures(t *testing.T) {
 		return true, nil, e
 	})
 
-	_, err = engine.InitVPN()
+	_, err = engine.InitVPN(&apiv1.ServicePort{})
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }

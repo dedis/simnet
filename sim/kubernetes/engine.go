@@ -21,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	_ "k8s.io/client-go/plugin/pkg/client/auth" // Allows authentication to cloud providers
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 )
@@ -80,8 +81,8 @@ type engine interface {
 	FetchPods() ([]apiv1.Pod, error)
 	UploadConfig() error
 	DeployRouter([]apiv1.Pod) (watch.Interface, error)
-	WaitRouter(watch.Interface) error
-	InitVPN() (sim.Tunnel, error)
+	WaitRouter(watch.Interface) (*apiv1.ServicePort, error)
+	InitVPN(*apiv1.ServicePort) (sim.Tunnel, error)
 	DeleteAll() (watch.Interface, error)
 	WaitDeletion(watch.Interface, time.Duration) error
 	ReadStats(pod string, start, end time.Time) (metrics.NodeStats, error)
@@ -241,6 +242,9 @@ func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
 		return nil, err
 	}
 
+	// TODO: an iptables rule is used to forward the traffic from the user
+	// to the private network as the vpn network is too wide. It would be
+	// better to use the correct mask when initiating the vpn server.
 	_, err = intf.Create(makeRouterDeployment())
 	if err != nil {
 		return nil, err
@@ -250,23 +254,37 @@ func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
 	return w, nil
 }
 
-func (kd *kubeEngine) createVPNService() error {
+func (kd *kubeEngine) createVPNService() (*apiv1.ServicePort, error) {
 	intf := kd.client.CoreV1().Services(kd.namespace)
+
+	w, err := intf.Watch(metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
 
 	opts, err := kd.makeRouterService()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	_, err = intf.Create(opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	for {
+		evt := <-w.ResultChan()
+		serv := evt.Object.(*apiv1.Service)
+
+		for _, port := range serv.Spec.Ports {
+			if port.NodePort > 0 {
+				return &port, nil
+			}
+		}
+	}
 }
 
-func (kd *kubeEngine) WaitRouter(w watch.Interface) error {
+func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, error) {
 	fmt.Fprintf(kd.writer, "Waiting for the router...")
 
 	for {
@@ -277,22 +295,22 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) error {
 
 		if dpl.Status.AvailableReplicas > 0 {
 			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... ok"))
-			err := kd.createVPNService()
+			port, err := kd.createVPNService()
 			if err != nil {
-				return err
+				return nil, err
 			}
-			return nil
+			return port, nil
 		}
 
 		hasFailure, reason := checkPodFailure(dpl)
 		if hasFailure {
 			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... failure"))
-			return errors.New(reason)
+			return nil, errors.New(reason)
 		}
 	}
 }
 
-func (kd *kubeEngine) InitVPN() (sim.Tunnel, error) {
+func (kd *kubeEngine) InitVPN(port *apiv1.ServicePort) (sim.Tunnel, error) {
 	fmt.Fprintf(kd.writer, "Fetching the router...")
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
@@ -330,7 +348,11 @@ func (kd *kubeEngine) InitVPN() (sim.Tunnel, error) {
 		return nil, err
 	}
 
-	tun, err := sim.NewDefaultTunnel(sim.WithHost(u.Hostname()), sim.WithCertificate(readers[2], readers[1], readers[0]))
+	tun, err := sim.NewDefaultTunnel(
+		sim.WithHost(u.Hostname()),
+		sim.WithPort(port.NodePort),
+		sim.WithCertificate(readers[2], readers[1], readers[0]),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -596,11 +618,6 @@ func makeRouterDeployment() *appsv1.Deployment {
 }
 
 func (kd kubeEngine) makeRouterService() (*apiv1.Service, error) {
-	u, err := url.Parse(kd.config.Host)
-	if err != nil {
-		return nil, err
-	}
-
 	return &apiv1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "simnet-router",
@@ -612,7 +629,7 @@ func (kd kubeEngine) makeRouterService() (*apiv1.Service, error) {
 					Protocol: apiv1.ProtocolUDP,
 				},
 			},
-			ExternalIPs: []string{u.Hostname()},
+			Type: apiv1.ServiceTypeNodePort,
 			Selector: map[string]string{
 				LabelID: RouterID,
 			},

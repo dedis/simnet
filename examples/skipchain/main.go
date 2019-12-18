@@ -33,6 +33,7 @@ func (r skipchainSimulationRound) Execute(ctx context.Context) error {
 	}
 
 	ro := onet.NewRoster(idents)
+	fmt.Printf("Roster: %v\n", ro.List)
 
 	client := skipchain.NewClient()
 	genesis, err := client.CreateGenesis(ro, 4, 32, skipchain.VerificationStandard, []byte("deadbeef"))
@@ -40,10 +41,10 @@ func (r skipchainSimulationRound) Execute(ctx context.Context) error {
 		return err
 	}
 
-	fmt.Printf("Genesis block %x created with roster %v.\n", genesis.Hash, genesis.Roster.List)
+	fmt.Printf("Genesis block %x created.\n", genesis.Hash)
 
 	data := make([]byte, 8)
-	n := 50
+	n := 5
 
 	for i := 0; i < n; i++ {
 		binary.LittleEndian.PutUint64(data, uint64(i))
@@ -85,8 +86,8 @@ func main() {
 		),
 		kubernetes.WithTopology(
 			net.NewAreaTopology(
-				&net.Area{N: 1},
-				&net.Area{N: 5, X: 100, Y: 0, Latency: net.Delay{Value: 25 * time.Millisecond}},
+				&net.Area{N: 3},
+				&net.Area{N: 4, X: 100, Y: 0, Latency: net.Delay{Value: 25 * time.Millisecond}},
 			),
 		),
 		kubernetes.WithImage(
