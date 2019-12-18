@@ -1,7 +1,7 @@
 EXAMPLE ?= skipchain
 
 run:
-	go run ./examples/${EXAMPLE}/main.go
+	cd ./examples/${EXAMPLE} && go run main.go
 
 plot:
 	go run ./metrics/plotter/ ${ARGS}
