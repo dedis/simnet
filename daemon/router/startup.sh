@@ -13,4 +13,4 @@ NETWORK=$(ipcalc -n $IP $MASK | cut -d "=" -f 2)
 # Allow the traffic to be forwarded to the LAN.
 iptables -t nat -I POSTROUTING -o eth0 -s 10.0.0.0/24 -j MASQUERADE
 
-openvpn --config server.conf --route $NETWORK $MASK
+openvpn --config server.conf --push "route $NETWORK $MASK"
