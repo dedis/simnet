@@ -437,6 +437,10 @@ func (kd *kubeEngine) ReadFile(pod, path string) (io.Reader, error) {
 	return kd.fs.Read(pod, ContainerAppName, path)
 }
 
+func (kd *kubeEngine) String() string {
+	return fmt.Sprintf("Kubernetes[%s] @ %s", kd.namespace, kd.config.Host)
+}
+
 func checkPodFailure(dpl *appsv1.Deployment) (bool, string) {
 	isAvailable := true
 	isProgressing := true

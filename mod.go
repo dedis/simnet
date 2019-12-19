@@ -47,6 +47,8 @@ func (s *Simulation) Run(args []string) error {
 
 	doAll := !doCleaning && !doDeploy && !doExecute
 
+	fmt.Fprintf(s.out, "Using strategy %v\n", s.strategy)
+
 	if doCleaning || doAll {
 		defer func() {
 			// Anything bad happening during the cleaning phase will be printed
