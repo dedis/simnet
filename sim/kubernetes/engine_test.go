@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -29,15 +30,16 @@ import (
 
 const testTimeout = 500 * time.Millisecond
 
-func init() {
-	setMockTunnel()
-}
-
 func TestEngine_NewFailures(t *testing.T) {
+	engine, err := newKubeEngine(&rest.Config{Host: ":"}, "", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "couldn't parse the host")
+	require.Nil(t, engine)
+
 	setMockBadClient()
 	defer setMockClient()
 
-	engine, err := newKubeEngine(nil, "", &Options{})
+	engine, err = newKubeEngine(nil, "", &Options{})
 	require.Error(t, err)
 	require.Equal(t, "client: client error", err.Error())
 	require.Nil(t, engine)
@@ -306,7 +308,7 @@ func TestEngine_WaitRouter(t *testing.T) {
 	fw.Modify(&apiv1.Service{Spec: apiv1.ServiceSpec{Ports: []apiv1.ServicePort{{NodePort: 31000}}}})
 	client.PrependWatchReactor("services", testcore.DefaultWatchReactor(fw, nil))
 
-	_, err := engine.WaitRouter(w)
+	_, _, err := engine.WaitRouter(w)
 	require.NoError(t, err)
 }
 
@@ -332,7 +334,7 @@ func TestEngine_WaitRouterFailure(t *testing.T) {
 		},
 	})
 
-	_, err := engine.WaitRouter(w)
+	_, _, err := engine.WaitRouter(w)
 	require.Error(t, err)
 	require.Equal(t, reason, err.Error())
 }
@@ -357,7 +359,7 @@ func TestEngine_WaitRouterVPNFailure(t *testing.T) {
 	})
 
 	engine.config.Host = ":"
-	_, err = engine.WaitRouter(w)
+	_, _, err = engine.WaitRouter(w)
 	require.Error(t, err)
 }
 
@@ -373,84 +375,85 @@ func TestEngine_CreateVPNFailures(t *testing.T) {
 	require.True(t, errors.Is(err, e))
 }
 
-func TestEngine_InitVPN(t *testing.T) {
-	list := &apiv1.PodList{
-		Items: []apiv1.Pod{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "simnet-router",
-					Labels: map[string]string{LabelID: RouterID},
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "node0"},
-			},
+func TestEngine_FetchCertificates(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		makeRouterPod(),
+		&apiv1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "node0"},
 		},
-	}
+	)
+
+	dir, err := ioutil.TempDir(os.TempDir(), "simnet-kubernetes-test")
+	require.NoError(t, err)
+
+	engine := newKubeEngineTest(client, "", 0)
+	engine.outDir = dir
+
+	certs, err := engine.FetchCertificates()
+	require.NoError(t, err)
+
+	stat, err := os.Stat(certs.CA)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0600), stat.Mode())
+
+	stat, err = os.Stat(certs.Cert)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0600), stat.Mode())
+
+	stat, err = os.Stat(certs.Key)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0600), stat.Mode())
+}
+
+func TestEngine_FetchCertificatesFailures(t *testing.T) {
+	engine, client := makeEngine(0)
+
+	e := errors.New("list error")
+	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
+		return true, nil, e
+	})
+
+	_, err := engine.FetchCertificates()
+	require.Error(t, err)
+	require.Equal(t, e, err)
+
+	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
+		return true, &apiv1.PodList{}, nil
+	})
+
+	_, err = engine.FetchCertificates()
+	require.Error(t, err)
+	require.Equal(t, "missing router pod", err.Error())
+
+	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
+		return true, &apiv1.PodList{Items: []apiv1.Pod{*makeRouterPod()}}, nil
+	})
+
+	engine.fs = &testFS{err: errors.New("oops")}
+	_, err = engine.FetchCertificates()
+	require.Error(t, err)
+}
+
+func TestEngine_WriteCertificatesFailures(t *testing.T) {
+	engine, _ := makeEngine(0)
+
+	err := engine.writeCertificates("", sim.Certificates{CA: "/", Key: "/", Cert: "/"})
+	require.Error(t, err)
+	require.IsType(t, (*os.PathError)(nil), err)
 
 	dir, err := ioutil.TempDir(os.TempDir(), "simnet-kubernetes-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", 1)
-	engine.outDir = dir
-
-	vpn, err := engine.InitVPN(&apiv1.ServicePort{})
-	require.NoError(t, err)
-	require.NotNil(t, vpn)
-}
-
-func TestEngine_InitVPNFailures(t *testing.T) {
-	engine, _ := makeEngine(0)
-
-	list := &apiv1.PodList{
-		Items: []apiv1.Pod{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "simnet-router",
-					Labels: map[string]string{LabelID: RouterID},
-				},
-			},
-		},
+	certs := sim.Certificates{
+		CA:   filepath.Join(dir, "ca"),
+		Key:  filepath.Join(dir, "key"),
+		Cert: filepath.Join(dir, "cert"),
 	}
-	engine.client = fake.NewSimpleClientset(list)
 
-	setMockBadTunnel()
-	defer setMockTunnel()
-
-	_, err := engine.InitVPN(&apiv1.ServicePort{})
+	engine.fs = &testFS{errRead: errors.New("oops")}
+	err = engine.writeCertificates("", certs)
 	require.Error(t, err)
-	require.Equal(t, err.Error(), "tunnel error")
-
-	// Expect an error when reading the client certificate.
-	e := errors.New("read error")
-	engine.fs = &testFS{err: e}
-	_, err = engine.InitVPN(&apiv1.ServicePort{})
-	require.Error(t, err)
-	require.Equal(t, e, err)
-
-	// Expect an error when parsing the host.
-	engine.fs = &testFS{}
-	engine.config.Host = ":"
-	_, err = engine.InitVPN(&apiv1.ServicePort{})
-	require.Error(t, err)
-
-	// Expect an error when fetching the router pod.
-	client := fake.NewSimpleClientset()
-	engine.client = client
-	_, err = engine.InitVPN(&apiv1.ServicePort{})
-	require.Error(t, err)
-	require.Equal(t, "missing router pod", err.Error())
-
-	// Expect an error when fetching the list of pods.
-	e = errors.New("fetch pod error")
-	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
-		return true, nil, e
-	})
-
-	_, err = engine.InitVPN(&apiv1.ServicePort{})
-	require.Error(t, err)
-	require.Equal(t, e, err)
 }
 
 func TestEngine_Delete(t *testing.T) {
@@ -565,6 +568,15 @@ func TestEngine_ReadFile(t *testing.T) {
 	require.NotNil(t, reader)
 }
 
+func TestEngine_String(t *testing.T) {
+	engine := &kubeEngine{
+		namespace: "default",
+		config:    &rest.Config{Host: "1.2.3.4"},
+	}
+
+	require.Equal(t, "Kubernetes[default] @ 1.2.3.4", engine.String())
+}
+
 func newKubeEngineTest(client kubernetes.Interface, ns string, n int) *kubeEngine {
 	r, w := io.Pipe()
 
@@ -587,32 +599,34 @@ func makeEngine(n int) (*kubeEngine, *fake.Clientset) {
 	return engine, client
 }
 
+func makeRouterPod() *apiv1.Pod {
+	return &apiv1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "simnet-router",
+			Labels: map[string]string{LabelID: RouterID},
+		},
+	}
+}
+
 type testFS struct {
-	err    error
-	reader io.ReadCloser
-	writer io.WriteCloser
+	err     error
+	errRead error
+	reader  io.ReadCloser
+	writer  io.WriteCloser
 }
 
 func (fs *testFS) Read(pod, container, path string) (io.ReadCloser, error) {
 	r, w := io.Pipe()
-	w.Close()
+	if fs.errRead != nil {
+		w.CloseWithError(fs.errRead)
+	} else {
+		w.Close()
+	}
 	return r, fs.err
 }
 
 func (fs *testFS) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan error, error) {
 	return fs.writer, nil, fs.err
-}
-
-func setMockTunnel() {
-	newTunnel = func(opts ...sim.TunOption) (*sim.DefaultTunnel, error) {
-		return &sim.DefaultTunnel{}, nil
-	}
-}
-
-func setMockBadTunnel() {
-	newTunnel = func(opts ...sim.TunOption) (*sim.DefaultTunnel, error) {
-		return nil, errors.New("tunnel error")
-	}
 }
 
 func setMockClient() {

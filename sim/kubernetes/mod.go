@@ -84,6 +84,7 @@ func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 
 	return &Strategy{
 		engine:      engine,
+		tun:         sim.NewDefaultTunnel(options.output),
 		namespace:   namespace,
 		options:     options,
 		makeEncoder: makeJSONEncoder,
@@ -121,19 +122,22 @@ func (s *Strategy) Deploy() error {
 		return err
 	}
 
-	port, err := s.engine.WaitRouter(w)
+	port, host, err := s.engine.WaitRouter(w)
 	w.Stop()
 	if err != nil {
 		return err
 	}
 
-	vpn, err := s.engine.InitVPN(port)
+	certificates, err := s.engine.FetchCertificates()
 	if err != nil {
 		return err
 	}
 
-	s.tun = vpn
-	err = vpn.Start()
+	err = s.tun.Start(
+		sim.WithPort(port.NodePort),
+		sim.WithHost(host),
+		sim.WithCertificate(certificates),
+	)
 	if err != nil {
 		return err
 	}

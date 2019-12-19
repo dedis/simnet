@@ -1,8 +1,6 @@
 package sim
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -15,59 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTunnel_New(t *testing.T) {
-	host := "abc"
-	port := int32(1234)
-	reader := new(bytes.Buffer)
-
-	dir, err := ioutil.TempDir(os.TempDir(), "simnet-tunnel-test")
-	defer os.RemoveAll(dir)
-
-	tun, err := NewDefaultTunnel(
-		WithOutput(dir),
-		WithHost(host),
-		WithPort(port),
-		WithCertificate(reader, reader, reader),
-	)
-
-	require.NoError(t, err)
-	require.NotNil(t, tun)
-	require.Equal(t, tun.host, host)
-	require.Equal(t, tun.port, fmt.Sprintf("%d", port))
-}
-
-func TestTunnel_NewFailures(t *testing.T) {
-	r1 := new(bytes.Buffer)
-	r2 := new(bytes.Buffer)
-	r3 := new(bytes.Buffer)
-
-	dir, err := ioutil.TempDir(os.TempDir(), "simnet-tunnel-test")
-	defer os.RemoveAll(dir)
-
-	_, err = NewDefaultTunnel(WithOutput(dir), WithCertificate(nil, r2, r3))
-	require.Error(t, err)
-
-	_, err = NewDefaultTunnel(WithOutput(dir), WithCertificate(r1, nil, r3))
-	require.Error(t, err)
-
-	_, err = NewDefaultTunnel(WithOutput(dir), WithCertificate(r1, r2, nil))
-	require.Error(t, err)
-}
-
-func TestTunnel_WriteFileFailures(t *testing.T) {
-	file, err := ioutil.TempFile(os.TempDir(), "simnet-tunnel-test")
-
-	e := errors.New("oops")
-	reader := badReader{err: e}
-	err = writeFile(reader, file.Name(), "")
-	require.Error(t, err)
-	require.Equal(t, e, err)
-
-	err = writeFile(reader, "", "")
-	require.Error(t, err)
-	require.IsType(t, (*os.PathError)(nil), err)
-}
-
 func TestTunnel_Start(t *testing.T) {
 	dir, err := ioutil.TempDir(os.TempDir(), "simnet-vpn-test")
 	require.NoError(t, err)
@@ -76,13 +21,11 @@ func TestTunnel_Start(t *testing.T) {
 
 	tun := &DefaultTunnel{
 		cmd:     exec.Command("echo"),
-		host:    "abc",
-		dir:     dir,
-		logFile: filepath.Join(dir, LogFileName),
+		outDir:  dir,
 		timeout: 1 * time.Second,
 	}
 
-	file, err := os.Create(tun.logFile)
+	file, err := os.Create(filepath.Join(dir, LogFileName))
 	require.NoError(t, err)
 
 	defer file.Close()
@@ -97,28 +40,30 @@ func TestTunnel_Start(t *testing.T) {
 		fmt.Fprintln(file, MessageInitDone)
 	}()
 
-	err = tun.Start()
+	certs := Certificates{}
+
+	err = tun.Start(WithPort(1234), WithHost("1.2.3.4"), WithCertificate(certs))
 	require.NoError(t, err)
+	require.Contains(t, tun.cmd.Args, "1234")
+	require.Contains(t, tun.cmd.Args, "1.2.3.4")
 }
 
 func TestTunnel_StartFailures(t *testing.T) {
-	tun := &DefaultTunnel{}
+	tun := NewDefaultTunnel("/")
 
 	// Expect an error if the log file cannot be created.
 	err := tun.Start()
 	require.Error(t, err)
 	require.IsType(t, (*os.PathError)(nil), err)
 
-	file, err := ioutil.TempFile(os.TempDir(), "simnet-tunnel-test")
+	dir, err := ioutil.TempDir(os.TempDir(), "simnet-tunnel-test")
 	require.NoError(t, err)
-	file.Close()
-
-	defer os.Remove(file.Name())
+	defer os.RemoveAll(dir)
 
 	// Expect an error if the command fails.
 	tun = &DefaultTunnel{
-		logFile: file.Name(),
-		cmd:     exec.Command("definitely not a valid cmd"),
+		outDir: dir,
+		cmd:    exec.Command("definitely not a valid cmd"),
 	}
 
 	err = tun.Start()
@@ -127,7 +72,7 @@ func TestTunnel_StartFailures(t *testing.T) {
 
 	// Expect an error if the tunnel connection times out.
 	tun = &DefaultTunnel{
-		logFile: file.Name(),
+		outDir:  dir,
 		cmd:     exec.Command("echo"),
 		timeout: time.Duration(0),
 	}
@@ -151,8 +96,7 @@ func TestTunnel_Stop(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	tun := &DefaultTunnel{
-		dir:     dir,
-		pidFile: filepath.Join(dir, PIDFileName),
+		outDir: dir,
 	}
 
 	err = tun.Stop()
@@ -178,8 +122,7 @@ func TestTunnel_StopFailures(t *testing.T) {
 	require.NoError(t, err)
 
 	tun = &DefaultTunnel{
-		dir:     dir,
-		pidFile: filepath.Join(dir, PIDFileName),
+		outDir: dir,
 	}
 	err = tun.Stop()
 	require.Error(t, err)

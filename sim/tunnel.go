@@ -43,30 +43,26 @@ const (
 
 // Tunnel provides primitives to open and close a tunnel to a private network.
 type Tunnel interface {
-	Start() error
+	Start(...TunOption) error
 	Stop() error
+}
+
+// Certificates holds the location of the different files.
+type Certificates struct {
+	CA   string
+	Key  string
+	Cert string
 }
 
 // TunOptions contains the data that will be used to start the vpn.
 type TunOptions struct {
-	Output string
-	Host   string
-	Port   int32
-	CA     io.Reader
-	Key    io.Reader
-	Cert   io.Reader
+	Host         string
+	Port         int32
+	Certificates Certificates
 }
 
 // TunOption is a function that transforms the vpn options.
 type TunOption func(opts *TunOptions)
-
-// WithOutput updates the options to use the given directory to store data
-// about the vpn like the logs and the client certificate.
-func WithOutput(dir string) TunOption {
-	return func(opts *TunOptions) {
-		opts.Output = dir
-	}
-}
 
 // WithHost updates the options to include the hostname of the distant vpn.
 func WithHost(host string) TunOption {
@@ -84,65 +80,40 @@ func WithPort(port int32) TunOption {
 
 // WithCertificate updates the options to include the certificate elements
 // in the parameters used to start the vpn.
-func WithCertificate(ca, key, cert io.Reader) TunOption {
+func WithCertificate(certs Certificates) TunOption {
 	return func(opts *TunOptions) {
-		opts.CA = ca
-		opts.Key = key
-		opts.Cert = cert
+		opts.Certificates = certs
 	}
 }
 
 // DefaultTunnel is an implementation of the tunnel interface that is using OpenVPN.
 type DefaultTunnel struct {
 	cmd     *exec.Cmd
-	dir     string
-	logFile string
-	pidFile string
-	host    string
-	port    string
+	outDir  string
 	in      io.ReadCloser
 	timeout time.Duration
 }
 
 // NewDefaultTunnel creates a new OpenVPN process.
-func NewDefaultTunnel(opts ...TunOption) (*DefaultTunnel, error) {
+func NewDefaultTunnel(output string) *DefaultTunnel {
+	cmd := exec.Command("sudo")
+
+	return &DefaultTunnel{
+		cmd:     cmd,
+		outDir:  output,
+		timeout: VpnConnectionTimeout,
+	}
+}
+
+// Start runs the openvpn process and returns any error that could happen before
+// the tunnel is setup.
+func (v *DefaultTunnel) Start(opts ...TunOption) error {
 	options := &TunOptions{}
 	for _, fn := range opts {
 		fn(options)
 	}
 
-	err := writeFile(options.CA, FileNameCA, options.Output)
-	if err != nil {
-		return nil, err
-	}
-
-	err = writeFile(options.Key, FileNameKey, options.Output)
-	if err != nil {
-		return nil, err
-	}
-
-	err = writeFile(options.Cert, FileNameCert, options.Output)
-	if err != nil {
-		return nil, err
-	}
-
-	cmd := exec.Command("sudo")
-
-	return &DefaultTunnel{
-		cmd:     cmd,
-		host:    options.Host,
-		port:    fmt.Sprintf("%d", options.Port),
-		dir:     options.Output,
-		logFile: filepath.Join(options.Output, LogFileName),
-		pidFile: filepath.Join(options.Output, PIDFileName),
-		timeout: VpnConnectionTimeout,
-	}, nil
-}
-
-// Start runs the openvpn process and returns any error that could happen before
-// the tunnel is setup.
-func (v *DefaultTunnel) Start() error {
-	file, err := os.Create(v.logFile)
+	file, err := os.Create(filepath.Join(v.outDir, LogFileName))
 	if err != nil {
 		return err
 	}
@@ -160,17 +131,17 @@ func (v *DefaultTunnel) Start() error {
 		"--dev",
 		"tun",
 		"--ca",
-		filepath.Join(v.dir, FileNameCA),
+		options.Certificates.CA,
 		"--cert",
-		filepath.Join(v.dir, FileNameCert),
+		options.Certificates.Cert,
 		"--key",
-		filepath.Join(v.dir, FileNameKey),
+		options.Certificates.Key,
 		"--proto",
 		"udp",
 		"--remote",
-		v.host,
+		options.Host,
 		"--port",
-		v.port,
+		fmt.Sprintf("%d", options.Port),
 		"--remote-cert-tls",
 		"server",
 		"--nobind",
@@ -181,10 +152,10 @@ func (v *DefaultTunnel) Start() error {
 		usr.Username,
 		"--daemon",
 		"--log",
-		v.logFile,
+		filepath.Join(v.outDir, LogFileName),
 		"--machine-readable-output",
 		"--writepid",
-		v.pidFile,
+		filepath.Join(v.outDir, PIDFileName),
 		"--verb",
 		"3",
 	}
@@ -194,7 +165,7 @@ func (v *DefaultTunnel) Start() error {
 
 	err = cmd.Run()
 	if err != nil {
-		return fmt.Errorf("vpn initialization failed: see %s", v.logFile)
+		return fmt.Errorf("vpn initialization failed: see %s", filepath.Join(v.outDir, LogFileName))
 	}
 
 	timeout := time.After(v.timeout)
@@ -218,7 +189,7 @@ func (v *DefaultTunnel) Start() error {
 
 // Stop closes the vpn tunnel.
 func (v *DefaultTunnel) Stop() error {
-	file, err := os.Open(v.pidFile)
+	file, err := os.Open(filepath.Join(v.outDir, PIDFileName))
 	if err != nil {
 		return err
 	}
@@ -237,28 +208,6 @@ func (v *DefaultTunnel) Stop() error {
 				return err
 			}
 		}
-	}
-
-	return nil
-}
-
-func writeFile(r io.Reader, name string, dir string) error {
-	if r == nil {
-		return errors.New("missing certificate reader")
-	}
-
-	// Create a file that can be read only by the user.
-	f, err := os.OpenFile(filepath.Join(dir, name), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-
-	defer f.Close()
-
-	br := bufio.NewReader(r)
-	_, err = br.WriteTo(f)
-	if err != nil {
-		return err
 	}
 
 	return nil

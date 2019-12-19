@@ -78,6 +78,7 @@ func TestStrategy_DeployWithFailures(t *testing.T) {
 	stry := &Strategy{
 		engine:  deployer,
 		options: NewOptions(nil),
+		tun:     testTunnel{},
 	}
 
 	err := stry.Deploy()
@@ -86,13 +87,13 @@ func TestStrategy_DeployWithFailures(t *testing.T) {
 	// Errors are tested in reverse order to avoid to reset err fields
 	// all the time.
 
-	e := errors.New("vpn start error")
-	deployer.errVpn = e
+	e := errors.New("tunnel start error")
+	stry.tun = testTunnel{err: e}
 	err = stry.Deploy()
 	require.Equal(t, e, err)
 
 	e = errors.New("fetch router error")
-	deployer.errFetchRouter = e
+	deployer.errFetchCerts = e
 	err = stry.Deploy()
 	require.Equal(t, e, err)
 
@@ -302,11 +303,10 @@ type testEngine struct {
 	errUploadConfig   error
 	errDeployRouter   error
 	errWaitRouter     error
-	errFetchRouter    error
+	errFetchCerts     error
 	errDeleteAll      error
 	errWaitDeletion   error
 	errRead           error
-	errVpn            error
 }
 
 func (te *testEngine) CreateDeployment(container apiv1.Container) (watch.Interface, error) {
@@ -329,12 +329,12 @@ func (te *testEngine) DeployRouter([]apiv1.Pod) (watch.Interface, error) {
 	return watch.NewFake(), te.errDeployRouter
 }
 
-func (te *testEngine) WaitRouter(watch.Interface) (*apiv1.ServicePort, error) {
-	return &apiv1.ServicePort{}, te.errWaitRouter
+func (te *testEngine) WaitRouter(watch.Interface) (*apiv1.ServicePort, string, error) {
+	return &apiv1.ServicePort{}, "", te.errWaitRouter
 }
 
-func (te *testEngine) InitVPN(*apiv1.ServicePort) (sim.Tunnel, error) {
-	return testVPN{err: te.errVpn}, te.errFetchRouter
+func (te *testEngine) FetchCertificates() (sim.Certificates, error) {
+	return sim.Certificates{}, te.errFetchCerts
 }
 
 func (te *testEngine) DeleteAll() (watch.Interface, error) {
@@ -390,7 +390,7 @@ type testTunnel struct {
 	err error
 }
 
-func (t testTunnel) Start() error {
+func (t testTunnel) Start(...sim.TunOption) error {
 	return t.err
 }
 
