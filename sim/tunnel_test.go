@@ -17,11 +17,23 @@ import (
 
 func TestTunnel_New(t *testing.T) {
 	host := "abc"
+	port := int32(1234)
 	reader := new(bytes.Buffer)
 
-	tun, err := NewDefaultTunnel(WithHost(host), WithCertificate(reader, reader, reader))
+	dir, err := ioutil.TempDir(os.TempDir(), "simnet-tunnel-test")
+	defer os.RemoveAll(dir)
+
+	tun, err := NewDefaultTunnel(
+		WithOutput(dir),
+		WithHost(host),
+		WithPort(port),
+		WithCertificate(reader, reader, reader),
+	)
+
 	require.NoError(t, err)
 	require.NotNil(t, tun)
+	require.Equal(t, tun.host, host)
+	require.Equal(t, tun.port, fmt.Sprintf("%d", port))
 }
 
 func TestTunnel_NewFailures(t *testing.T) {
@@ -29,13 +41,16 @@ func TestTunnel_NewFailures(t *testing.T) {
 	r2 := new(bytes.Buffer)
 	r3 := new(bytes.Buffer)
 
-	_, err := NewDefaultTunnel(WithCertificate(nil, r2, r3))
+	dir, err := ioutil.TempDir(os.TempDir(), "simnet-tunnel-test")
+	defer os.RemoveAll(dir)
+
+	_, err = NewDefaultTunnel(WithOutput(dir), WithCertificate(nil, r2, r3))
 	require.Error(t, err)
 
-	_, err = NewDefaultTunnel(WithCertificate(r1, nil, r3))
+	_, err = NewDefaultTunnel(WithOutput(dir), WithCertificate(r1, nil, r3))
 	require.Error(t, err)
 
-	_, err = NewDefaultTunnel(WithCertificate(r1, r2, nil))
+	_, err = NewDefaultTunnel(WithOutput(dir), WithCertificate(r1, r2, nil))
 	require.Error(t, err)
 }
 

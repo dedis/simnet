@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -358,7 +360,13 @@ func TestEngine_InitVPN(t *testing.T) {
 			},
 		},
 	}
+
+	dir, err := ioutil.TempDir(os.TempDir(), "simnet-kubernetes-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
 	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", 1)
+	engine.outDir = dir
 
 	vpn, err := engine.InitVPN(&apiv1.ServicePort{})
 	require.NoError(t, err)

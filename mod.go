@@ -1,12 +1,20 @@
 package simnet
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 
 	"go.dedis.ch/simnet/sim"
 )
+
+var doCleaning bool
+var doDeploy bool
+var doExecute bool
+
+var errMissingArgs = errors.New("expect at least one argument")
 
 // Simulation is a Kubernetes simulation.
 type Simulation struct {
@@ -25,33 +33,50 @@ func NewSimulation(r sim.Round, e sim.Strategy) *Simulation {
 }
 
 // Run uses the round interface to run the simulation.
-func (s *Simulation) Run() error {
-	// TODO: flagset for options.
+func (s *Simulation) Run(args []string) error {
+	if len(args) == 0 {
+		return errMissingArgs
+	}
 
-	defer func() {
-		// Anything bad happening during the cleaning phase will be printed
-		// so an error of the simulation is returned if any.
+	flagset := flag.NewFlagSet(args[0], flag.ExitOnError)
+	flagset.BoolVar(&doCleaning, "do-clean", false, "override the usual flow to only wipe simulation resources")
+	flagset.BoolVar(&doDeploy, "do-deploy", false, "override the usual flow to only deploy simulation resources")
+	flagset.BoolVar(&doExecute, "do-execute", false, "override the usual flow to only run the simulation round")
 
-		err := s.strategy.Clean()
+	flagset.Parse(args[1:])
+
+	doAll := !doCleaning && !doDeploy && !doExecute
+
+	if doCleaning || doAll {
+		defer func() {
+			// Anything bad happening during the cleaning phase will be printed
+			// so an error of the simulation is returned if any.
+
+			err := s.strategy.Clean()
+			if err != nil {
+				fmt.Fprintf(s.out, "An error occured during cleaning: %v\n", err)
+				fmt.Fprintln(s.out, "Please make sure to clean remaining components.")
+			}
+		}()
+	}
+
+	if doDeploy || doAll {
+		err := s.strategy.Deploy()
 		if err != nil {
-			fmt.Fprintf(s.out, "An error occured during cleaning: %v\n", err)
-			fmt.Fprintln(s.out, "Please make sure to clean remaining components.")
+			return err
 		}
-	}()
-
-	err := s.strategy.Deploy()
-	if err != nil {
-		return err
 	}
 
-	err = s.strategy.Execute(s.round)
-	if err != nil {
-		return err
-	}
+	if doExecute || doAll {
+		err := s.strategy.Execute(s.round)
+		if err != nil {
+			return err
+		}
 
-	err = s.strategy.WriteStats("result.json")
-	if err != nil {
-		return err
+		err = s.strategy.WriteStats("result.json")
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

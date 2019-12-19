@@ -15,6 +15,6 @@ type Round interface {
 type Strategy interface {
 	Deploy() error
 	Execute(Round) error
-	WriteStats(filepath string) error
+	WriteStats(filename string) error
 	Clean() error
 }

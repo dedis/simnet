@@ -19,6 +19,30 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 )
 
+func TestOption_Output(t *testing.T) {
+	// With a value
+	options := NewOptions([]Option{WithOutput("abc")})
+	require.Equal(t, "abc", options.output)
+
+	// Default with working home directory
+	homeDir, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	options = NewOptions([]Option{WithOutput("")})
+	require.Equal(t, filepath.Join(homeDir, ".config", "simnet"), options.output)
+
+	// Default with home directory not accessible.
+	userHomeDir = func() (string, error) {
+		return "", errors.New("oops")
+	}
+	defer func() {
+		userHomeDir = os.UserHomeDir
+	}()
+
+	options = NewOptions([]Option{WithOutput("")})
+	require.Equal(t, filepath.Join(".config", "simnet"), options.output)
+}
+
 func TestOption_FileMapper(t *testing.T) {
 	e := errors.New("oops")
 	options := NewOptions([]Option{WithFileMapper(FilesKey("abc"), FileMapper{
@@ -85,12 +109,6 @@ users:
 `
 
 func TestStrategy_New(t *testing.T) {
-	// It should fail as the file does not exist
-	_, err := NewStrategy("abc")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "config: ")
-
-	// Now let's try with an actual file.
 	f, err := ioutil.TempFile(os.TempDir(), "")
 	require.NoError(t, err)
 	defer f.Close()
@@ -102,6 +120,17 @@ func TestStrategy_New(t *testing.T) {
 	sim, err := NewStrategy(f.Name())
 	require.NoError(t, err)
 	require.NotNil(t, sim)
+}
+
+func TestStrategy_NewFailures(t *testing.T) {
+	// It should fail as the file does not exist
+	_, err := NewStrategy("abc")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "config: ")
+
+	_, err = NewStrategy("abc", WithOutput("/abc"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "couldn't create the data folder")
 }
 
 func TestStrategy_DeployWithFailures(t *testing.T) {
@@ -224,37 +253,44 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 	err = stry.Execute(testRound{})
 	require.Error(t, err)
 	require.Equal(t, e2, err)
+
+	stry.options = NewOptions([]Option{})
+	e = errors.New("round error")
+	err = stry.Execute(testRound{err: e})
+	require.True(t, errors.Is(err, e))
 }
 
 func TestStrategy_WriteStats(t *testing.T) {
+	dir, err := ioutil.TempDir(os.TempDir(), "simnet-kubernetes-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
 	reader, writer := io.Pipe()
 	stry := &Strategy{
 		pods:        []apiv1.Pod{{}},
 		engine:      &testEngine{reader: reader},
 		makeEncoder: makeJSONEncoder,
+		options: &Options{
+			output: dir,
+		},
 	}
-
-	// Get a temporary file path.
-	f, err := ioutil.TempFile(os.TempDir(), "")
-	require.NoError(t, err)
-
-	filepath := f.Name()
-	require.NoError(t, os.Remove(filepath))
 
 	writer.Close()
 
-	err = stry.WriteStats(filepath)
+	file := "data.json"
+	err = stry.WriteStats(file)
 	require.NoError(t, err)
 
-	_, err = os.Stat(filepath)
+	_, err = os.Stat(filepath.Join(dir, file))
 	require.NoError(t, err)
 }
 
 func TestStrategy_WriteStatsFailures(t *testing.T) {
 	e := errors.New("read stats error")
 	stry := &Strategy{
-		pods:   []apiv1.Pod{{}},
-		engine: &testEngine{errRead: e},
+		pods:    []apiv1.Pod{{}},
+		engine:  &testEngine{errRead: e},
+		options: &Options{},
 	}
 
 	err := stry.WriteStats("")
@@ -267,12 +303,13 @@ func TestStrategy_WriteStatsFailures(t *testing.T) {
 	require.Error(t, err)
 	require.IsType(t, (*os.PathError)(nil), err)
 
-	dir, err := ioutil.TempDir(os.TempDir(), "simnet-test")
+	dir, err := ioutil.TempDir(os.TempDir(), "simnet-kubernetes-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
 	stry.makeEncoder = newBadEncoder
-	err = stry.WriteStats(filepath.Join(dir, "data"))
+	stry.options.output = dir
+	err = stry.WriteStats("data.json")
 	require.Error(t, err)
 	require.Equal(t, "encoding error", err.Error())
 }
@@ -372,10 +409,15 @@ func (te *testEngine) ReadFile(string, string) (io.Reader, error) {
 }
 
 type testRound struct {
-	h func(context.Context)
+	h   func(context.Context)
+	err error
 }
 
 func (tr testRound) Execute(ctx context.Context) error {
+	if tr.err != nil {
+		return tr.err
+	}
+
 	if tr.h != nil {
 		tr.h(ctx)
 	}

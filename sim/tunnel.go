@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/user"
@@ -22,7 +21,7 @@ const (
 
 	// LogFileName is the name of the file written in the temporary folder
 	// where the logs of the vpn are written.
-	LogFileName = "out.log"
+	LogFileName = "vpn.log"
 	// PIDFileName is the name of the file written in the temporary folder
 	// containing the PID of the VPN process.
 	PIDFileName = "running_pid"
@@ -50,15 +49,24 @@ type Tunnel interface {
 
 // TunOptions contains the data that will be used to start the vpn.
 type TunOptions struct {
-	Host string
-	Port int32
-	CA   io.Reader
-	Key  io.Reader
-	Cert io.Reader
+	Output string
+	Host   string
+	Port   int32
+	CA     io.Reader
+	Key    io.Reader
+	Cert   io.Reader
 }
 
 // TunOption is a function that transforms the vpn options.
 type TunOption func(opts *TunOptions)
+
+// WithOutput updates the options to use the given directory to store data
+// about the vpn like the logs and the client certificate.
+func WithOutput(dir string) TunOption {
+	return func(opts *TunOptions) {
+		opts.Output = dir
+	}
+}
 
 // WithHost updates the options to include the hostname of the distant vpn.
 func WithHost(host string) TunOption {
@@ -103,22 +111,17 @@ func NewDefaultTunnel(opts ...TunOption) (*DefaultTunnel, error) {
 		fn(options)
 	}
 
-	dir, err := ioutil.TempDir(os.TempDir(), "simnet-vpn")
+	err := writeFile(options.CA, FileNameCA, options.Output)
 	if err != nil {
 		return nil, err
 	}
 
-	err = writeFile(options.CA, FileNameCA, dir)
+	err = writeFile(options.Key, FileNameKey, options.Output)
 	if err != nil {
 		return nil, err
 	}
 
-	err = writeFile(options.Key, FileNameKey, dir)
-	if err != nil {
-		return nil, err
-	}
-
-	err = writeFile(options.Cert, FileNameCert, dir)
+	err = writeFile(options.Cert, FileNameCert, options.Output)
 	if err != nil {
 		return nil, err
 	}
@@ -129,9 +132,9 @@ func NewDefaultTunnel(opts ...TunOption) (*DefaultTunnel, error) {
 		cmd:     cmd,
 		host:    options.Host,
 		port:    fmt.Sprintf("%d", options.Port),
-		dir:     dir,
-		logFile: filepath.Join(dir, LogFileName),
-		pidFile: filepath.Join(dir, PIDFileName),
+		dir:     options.Output,
+		logFile: filepath.Join(options.Output, LogFileName),
+		pidFile: filepath.Join(options.Output, PIDFileName),
 		timeout: VpnConnectionTimeout,
 	}, nil
 }
@@ -215,8 +218,6 @@ func (v *DefaultTunnel) Start() error {
 
 // Stop closes the vpn tunnel.
 func (v *DefaultTunnel) Stop() error {
-	defer os.RemoveAll(v.dir)
-
 	file, err := os.Open(v.pidFile)
 	if err != nil {
 		return err

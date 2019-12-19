@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"go.dedis.ch/simnet/metrics"
@@ -27,11 +28,14 @@ const (
 	ContainerRouterName = "router"
 )
 
+var userHomeDir = os.UserHomeDir
+
 // Options contains the different options for a simulation execution.
 type Options struct {
 	files     map[interface{}]FileMapper
 	topology  network.Topology
 	container apiv1.Container
+	output    string
 }
 
 // NewOptions creates empty options.
@@ -48,11 +52,30 @@ func NewOptions(opts []Option) *Options {
 		o.topology = network.NewSimpleTopology(3, 0)
 	}
 
+	if o.output == "" {
+		homeDir, err := userHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Couldn't get the user home directory: %v", err)
+			// Default to relative folder if the home directory cannot be found.
+			homeDir = ""
+		}
+
+		o.output = filepath.Join(homeDir, ".config", "simnet")
+	}
+
 	return o
 }
 
 // Option is a function that changes the global options.
 type Option func(opts *Options)
+
+// WithOutput is an option to change the default directory that will be used
+// to write data about the simulation.
+func WithOutput(dir string) Option {
+	return func(opts *Options) {
+		opts.output = dir
+	}
+}
 
 // FilesKey is the kind of key that will be used to retrieve the files
 // inside the execution context.
@@ -177,17 +200,19 @@ type Strategy struct {
 func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 	options := NewOptions(opts)
 
+	// Create the directory where the data will be stored.
+	err := os.MkdirAll(options.output, 0755)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't create the data folder: %v", err)
+	}
+
 	config, err := clientcmd.BuildConfigFromFlags("", cfg)
 	if err != nil {
 		return nil, fmt.Errorf("config: %v", err)
 	}
 
-	nodes := make([]string, 5)
-	for i := range nodes {
-		nodes[i] = fmt.Sprintf("node%d", i)
-	}
-
-	engine, err := newKubeDeployer(config, "default", options.topology)
+	// TODO: namespace from the config
+	engine, err := newKubeDeployer(config, "default", options)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +321,7 @@ func (s *Strategy) Execute(round sim.Round) error {
 
 // WriteStats fetches the stats of the nodes then write them into a JSON
 // formatted file.
-func (s *Strategy) WriteStats(filepath string) error {
+func (s *Strategy) WriteStats(filename string) error {
 	stats := metrics.Stats{
 		Timestamp: s.executeTime.Unix(),
 		Nodes:     make(map[string]metrics.NodeStats),
@@ -311,7 +336,7 @@ func (s *Strategy) WriteStats(filepath string) error {
 		stats.Nodes[pod.Name] = ns
 	}
 
-	f, err := os.Create(filepath)
+	f, err := os.Create(filepath.Join(s.options.output, filename))
 	if err != nil {
 		return err
 	}

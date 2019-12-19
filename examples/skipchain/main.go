@@ -106,7 +106,7 @@ func main() {
 
 	sim := simnet.NewSimulation(skipchainSimulationRound{}, engine)
 
-	err = sim.Run()
+	err = sim.Run(os.Args)
 	if err != nil {
 		panic(err)
 	}

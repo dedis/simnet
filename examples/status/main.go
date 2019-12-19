@@ -94,7 +94,7 @@ func main() {
 
 	sim := simnet.NewSimulation(StatusSimulationRound{}, engine)
 
-	err = sim.Run()
+	err = sim.Run(os.Args)
 	if err != nil {
 		panic(err)
 	}

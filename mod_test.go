@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -61,28 +62,34 @@ func TestSimulation_Run(t *testing.T) {
 	buffer := new(bytes.Buffer)
 	sim.out = buffer
 
-	require.NoError(t, sim.Run())
+	args := []string{os.Args[0]}
+
+	require.NoError(t, sim.Run(args))
+
+	err := sim.Run([]string{})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, errMissingArgs))
 
 	stry.errDeploy = errors.New("deploy")
-	err := sim.Run()
+	err = sim.Run(args)
 	require.Error(t, err)
-	require.Equal(t, "deploy", err.Error())
+	require.True(t, errors.Is(err, stry.errDeploy))
 
 	stry.errDeploy = nil
 	stry.errExecute = errors.New("execute")
-	err = sim.Run()
+	err = sim.Run(args)
 	require.Error(t, err)
-	require.Equal(t, "execute", err.Error())
+	require.True(t, errors.Is(err, stry.errExecute))
 
 	stry.errExecute = nil
 	stry.errStats = errors.New("stats")
-	err = sim.Run()
+	err = sim.Run(args)
 	require.Error(t, err)
-	require.Equal(t, "stats", err.Error())
+	require.True(t, errors.Is(err, stry.errStats))
 
 	stry.errStats = nil
 	stry.errClean = errors.New("clean")
-	err = sim.Run()
+	err = sim.Run(args)
 	require.NoError(t, err)
 	require.Contains(t, buffer.String(), "An error occured during cleaning")
 }
