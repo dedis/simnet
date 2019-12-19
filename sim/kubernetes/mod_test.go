@@ -123,11 +123,12 @@ func TestStrategy_New(t *testing.T) {
 }
 
 func TestStrategy_NewFailures(t *testing.T) {
-	// It should fail as the file does not exist
+	// Expect an error as the config file does not exist
 	_, err := NewStrategy("abc")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "config: ")
 
+	// Expect an error as the output directory cannot be created.
 	_, err = NewStrategy("abc", WithOutput("/abc"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "couldn't create the data folder")

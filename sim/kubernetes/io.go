@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -13,15 +12,17 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
+var newExecutor = remotecommand.NewSPDYExecutor
+
 type fs interface {
 	Read(string, string, string) (io.ReadCloser, error)
 	Write(string, string, []string) (io.WriteCloser, <-chan error, error)
 }
 
 type kfs struct {
-	restclient   rest.Interface
-	namespace    string
-	makeExecutor func(*url.URL) (remotecommand.Executor, error)
+	restclient rest.Interface
+	namespace  string
+	config     *rest.Config
 }
 
 func (fs kfs) Read(pod, container, path string) (io.ReadCloser, error) {
@@ -42,7 +43,7 @@ func (fs kfs) Read(pod, container, path string) (io.ReadCloser, error) {
 			TTY:       false,
 		}, scheme.ParameterCodec)
 
-	exec, err := fs.makeExecutor(req.URL())
+	exec, err := newExecutor(fs.config, "POST", req.URL())
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +96,7 @@ func (fs kfs) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan
 			TTY:       false,
 		}, scheme.ParameterCodec)
 
-	exec, err := fs.makeExecutor(req.URL())
+	exec, err := newExecutor(fs.config, "POST", req.URL())
 	if err != nil {
 		return nil, nil, err
 	}

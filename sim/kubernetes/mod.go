@@ -55,7 +55,7 @@ func NewOptions(opts []Option) *Options {
 	if o.output == "" {
 		homeDir, err := userHomeDir()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Couldn't get the user home directory: %v", err)
+			fmt.Fprintf(os.Stderr, "Couldn't get the user home directory: %v\n", err)
 			// Default to relative folder if the home directory cannot be found.
 			homeDir = ""
 		}
@@ -212,7 +212,7 @@ func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 	}
 
 	// TODO: namespace from the config
-	engine, err := newKubeDeployer(config, "default", options)
+	engine, err := newKubeEngine(config, "default", options)
 	if err != nil {
 		return nil, err
 	}

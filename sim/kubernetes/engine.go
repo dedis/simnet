@@ -23,7 +23,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth" // Allows authentication to cloud providers
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/remotecommand"
 )
 
 const (
@@ -75,6 +74,9 @@ var (
 	AppLimitCPU = resource.MustParse("200m")
 )
 
+var newTunnel = sim.NewDefaultTunnel
+var newClient = kubernetes.NewForConfig
+
 type engine interface {
 	CreateDeployment(container apiv1.Container) (watch.Interface, error)
 	WaitDeployment(watch.Interface) error
@@ -100,8 +102,8 @@ type kubeEngine struct {
 	pods      []apiv1.Pod
 }
 
-func newKubeDeployer(config *rest.Config, ns string, options *Options) (*kubeEngine, error) {
-	client, err := kubernetes.NewForConfig(config)
+func newKubeEngine(config *rest.Config, ns string, options *Options) (*kubeEngine, error) {
+	client, err := newClient(config)
 	if err != nil {
 		return nil, fmt.Errorf("client: %v", err)
 	}
@@ -116,9 +118,7 @@ func newKubeDeployer(config *rest.Config, ns string, options *Options) (*kubeEng
 		fs: kfs{
 			restclient: client.CoreV1().RESTClient(),
 			namespace:  ns,
-			makeExecutor: func(u *url.URL) (remotecommand.Executor, error) {
-				return remotecommand.NewSPDYExecutor(config, "POST", u)
-			},
+			config:     config,
 		},
 	}, nil
 }
@@ -261,12 +261,7 @@ func (kd *kubeEngine) createVPNService() (*apiv1.ServicePort, error) {
 		return nil, err
 	}
 
-	opts, err := kd.makeRouterService()
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = intf.Create(opts)
+	_, err = intf.Create(kd.makeRouterService())
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +343,7 @@ func (kd *kubeEngine) InitVPN(port *apiv1.ServicePort) (sim.Tunnel, error) {
 		return nil, err
 	}
 
-	tun, err := sim.NewDefaultTunnel(
+	tun, err := newTunnel(
 		sim.WithOutput(kd.outDir),
 		sim.WithHost(u.Hostname()),
 		sim.WithPort(port.NodePort),
@@ -618,7 +613,7 @@ func makeRouterDeployment() *appsv1.Deployment {
 	}
 }
 
-func (kd kubeEngine) makeRouterService() (*apiv1.Service, error) {
+func (kd kubeEngine) makeRouterService() *apiv1.Service {
 	return &apiv1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "simnet-router",
@@ -635,5 +630,5 @@ func (kd kubeEngine) makeRouterService() (*apiv1.Service, error) {
 				LabelID: RouterID,
 			},
 		},
-	}, nil
+	}
 }

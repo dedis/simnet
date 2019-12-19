@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/simnet/network"
+	"go.dedis.ch/simnet/sim"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -27,6 +28,20 @@ import (
 )
 
 const testTimeout = 500 * time.Millisecond
+
+func init() {
+	setMockTunnel()
+}
+
+func TestEngine_NewFailures(t *testing.T) {
+	setMockBadClient()
+	defer setMockClient()
+
+	engine, err := newKubeEngine(nil, "", &Options{})
+	require.Error(t, err)
+	require.Equal(t, "client: client error", err.Error())
+	require.Nil(t, engine)
+}
 
 func TestEngine_CreateDeployments(t *testing.T) {
 	n := 3
@@ -346,6 +361,18 @@ func TestEngine_WaitRouterVPNFailure(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestEngine_CreateVPNFailures(t *testing.T) {
+	engine, client := makeEngine(0)
+	fw := watch.NewFake()
+
+	e := errors.New("watch error")
+	client.PrependWatchReactor("services", testcore.DefaultWatchReactor(fw, e))
+
+	_, err := engine.createVPNService()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
+}
+
 func TestEngine_InitVPN(t *testing.T) {
 	list := &apiv1.PodList{
 		Items: []apiv1.Pod{
@@ -388,10 +415,17 @@ func TestEngine_InitVPNFailures(t *testing.T) {
 	}
 	engine.client = fake.NewSimpleClientset(list)
 
+	setMockBadTunnel()
+	defer setMockTunnel()
+
+	_, err := engine.InitVPN(&apiv1.ServicePort{})
+	require.Error(t, err)
+	require.Equal(t, err.Error(), "tunnel error")
+
 	// Expect an error when reading the client certificate.
 	e := errors.New("read error")
 	engine.fs = &testFS{err: e}
-	_, err := engine.InitVPN(&apiv1.ServicePort{})
+	_, err = engine.InitVPN(&apiv1.ServicePort{})
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
@@ -567,4 +601,26 @@ func (fs *testFS) Read(pod, container, path string) (io.ReadCloser, error) {
 
 func (fs *testFS) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan error, error) {
 	return fs.writer, nil, fs.err
+}
+
+func setMockTunnel() {
+	newTunnel = func(opts ...sim.TunOption) (*sim.DefaultTunnel, error) {
+		return &sim.DefaultTunnel{}, nil
+	}
+}
+
+func setMockBadTunnel() {
+	newTunnel = func(opts ...sim.TunOption) (*sim.DefaultTunnel, error) {
+		return nil, errors.New("tunnel error")
+	}
+}
+
+func setMockClient() {
+	newClient = kubernetes.NewForConfig
+}
+
+func setMockBadClient() {
+	newClient = func(*rest.Config) (*kubernetes.Clientset, error) {
+		return nil, errors.New("client error")
+	}
 }

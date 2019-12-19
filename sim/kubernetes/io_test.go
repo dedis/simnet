@@ -8,16 +8,18 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/rest"
 	restfake "k8s.io/client-go/rest/fake"
 	"k8s.io/client-go/tools/remotecommand"
 )
 
 func TestIO_Read(t *testing.T) {
+	newExecutor = func(cfg *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
+		return testExecutorFactory(nil, nil, u)
+	}
+
 	fs := kfs{
 		restclient: &restfake.RESTClient{},
-		makeExecutor: func(u *url.URL) (remotecommand.Executor, error) {
-			return testExecutorFactory(nil, nil, u)
-		},
 	}
 
 	reader, err := fs.Read("pod", "container", "this/is/a/file")
@@ -30,18 +32,19 @@ func TestIO_Read(t *testing.T) {
 
 func TestIO_ReadFailure(t *testing.T) {
 	e := errors.New("make executor error")
+	newExecutor = func(cfg *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
+		return testExecutorFactory(e, nil, u)
+	}
+
 	fs := kfs{
 		restclient: &restfake.RESTClient{},
-		makeExecutor: func(u *url.URL) (remotecommand.Executor, error) {
-			return testExecutorFactory(e, nil, u)
-		},
 	}
 
 	_, err := fs.Read("", "", "")
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
-	fs.makeExecutor = func(u *url.URL) (remotecommand.Executor, error) {
+	newExecutor = func(cfg *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
 		return testFailingExecutorFactory(u)
 	}
 	reader, err := fs.Read("", "", "")
@@ -54,11 +57,12 @@ func TestIO_ReadFailure(t *testing.T) {
 
 func TestIO_Write(t *testing.T) {
 	out := new(bytes.Buffer)
+	newExecutor = func(cfg *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
+		return testExecutorFactory(nil, out, u)
+	}
+
 	fs := kfs{
 		restclient: &restfake.RESTClient{},
-		makeExecutor: func(u *url.URL) (remotecommand.Executor, error) {
-			return testExecutorFactory(nil, out, u)
-		},
 	}
 
 	w, done, err := fs.Write("", "", []string{})
@@ -75,22 +79,20 @@ func TestIO_Write(t *testing.T) {
 
 func TestIO_WriteFailure(t *testing.T) {
 	e := errors.New("make executor error")
+	newExecutor = func(cfg *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
+		return testExecutorFactory(e, nil, u)
+	}
+
 	fs := kfs{
 		restclient: &restfake.RESTClient{},
-		makeExecutor: func(u *url.URL) (remotecommand.Executor, error) {
-			return testExecutorFactory(e, nil, u)
-		},
 	}
 
 	_, _, err := fs.Write("", "", []string{})
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
-	fs = kfs{
-		restclient: &restfake.RESTClient{},
-		makeExecutor: func(u *url.URL) (remotecommand.Executor, error) {
-			return testFailingExecutorFactory(u)
-		},
+	newExecutor = func(cfg *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
+		return testFailingExecutorFactory(u)
 	}
 
 	_, done, err := fs.Write("", "", []string{})
