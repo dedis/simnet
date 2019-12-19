@@ -1,5 +1,8 @@
 # Simnet
 
+[![Build Status](https://travis-ci.org/dedis/simnet.svg?branch=master)](https://travis-ci.org/dedis/simnet)
+[![Coverage Status](https://coveralls.io/repos/github/dedis/simnet/badge.svg?branch=master)](https://coveralls.io/github/dedis/simnet?branch=master)
+
 Simnet is a tool to simulate a decentralized application using the cloud to
 host the simulation nodes. It provides multiple configurations to affect the
 topology so that specific link between two nodes can have a delay or a loss
@@ -7,44 +10,14 @@ of packets.
 
 TODO: extend the doc
 
-Important: not all Docker images are deployed so it cannot currently be run
-on a live cluster.
-
-## Status
-
-[![Build Status](https://travis-ci.org/dedis/simnet.svg?branch=master)](https://travis-ci.org/dedis/simnet)
-[![Coverage Status](https://coveralls.io/repos/github/dedis/simnet/badge.svg?branch=master)](https://coveralls.io/github/dedis/simnet?branch=master)
-
-### Daemons
-
-#### SimNet router
-
-![Docker Cloud Automated build](https://img.shields.io/docker/cloud/automated/dedis/simnet-router)
-![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router)
-
-#### SimNet router initialization
-
-![Docker Cloud Automated build](https://img.shields.io/docker/cloud/automated/dedis/simnet-router-init)
-![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router-init)
-
-#### SimNet monitor
-
-![Docker Cloud Automated build](https://img.shields.io/docker/cloud/automated/dedis/simnet-monitor)
-![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-monitor)
-
-## Engines
-
-The simulation uses engines to manage the deployment and running of the rounds.
-A kubernetes engine is provided and used by default.
-TODO: Docker engine for local simulations ?
-
-# Versioning
-
-## Tools
-
-The versions follow the semantic versioning syntax to comply with Go modules.
-
 ## Daemons
+
+Some strategies like Kubernetes might need additionnal containers to work. These
+are built independently using the automated build of DockerHub.
+
+| Router | Router Init | Monitor |
+| ------ | ----------- | ------- |
+| [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-router/timeline) | [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-monitor?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-monitor/timeline) | [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router-init?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-router-init/timeline) |
 
 Docker images for the daemons have their own version that will trigger a build
 for each new version. The master branch will also build its own tag for each
@@ -54,10 +27,12 @@ Dockerhub is configured to automatically create the following tags:
 - `latest` for the master branch
 - `x.y.z` for each `daemon-vx.y.z` tag on the repository
 
-The build status can be monitored for each daemon:
-- [simnet-router](https://hub.docker.com/repository/docker/dedis/simnet-router/timeline)
-- [simnet-router-init](https://hub.docker.com/repository/docker/dedis/simnet-router-init/timeline)
-- [simnet-monitor](https://hub.docker.com/repository/docker/dedis/simnet-monitor/timeline)
+## Strategies
+
+The simulation uses strategies to manage the deployment and running of the rounds.
+A kubernetes strategy is provided and used by default.
+
+TODO: Docker strategy for local simulations ?
 
 # How to
 
