@@ -150,9 +150,9 @@ func TestStrategy_Execute(t *testing.T) {
 
 	done := make(chan struct{}, 1)
 	h := func(ctx context.Context) {
-		contents := ctx.Value(key).(map[string]interface{})
+		contents := ctx.Value(key).(Files)
 		require.Equal(t, len(stry.pods), len(contents))
-		require.Equal(t, "content", contents["a.a.a.a"])
+		require.Equal(t, "content", contents[Identifier{Index: 0, ID: "a", IP: "a.a.a.a"}])
 
 		done <- struct{}{}
 	}

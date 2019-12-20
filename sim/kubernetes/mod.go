@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.dedis.ch/simnet/metrics"
+	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
@@ -149,15 +150,21 @@ func (s *Strategy) makeContext() (context.Context, error) {
 	ctx := context.Background()
 
 	for key, fm := range s.options.files {
-		files := make(map[string]interface{})
+		files := make(Files)
 
-		for _, pod := range s.pods {
+		for i, pod := range s.pods {
 			reader, err := s.engine.ReadFile(pod.Name, fm.Path)
 			if err != nil {
 				return nil, err
 			}
 
-			files[pod.Status.PodIP], err = fm.Mapper(reader)
+			ident := Identifier{
+				Index: i,
+				ID:    network.Node(pod.Name),
+				IP:    pod.Status.PodIP,
+			}
+
+			files[ident], err = fm.Mapper(reader)
 			if err != nil {
 				return nil, err
 			}

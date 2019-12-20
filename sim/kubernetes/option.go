@@ -61,6 +61,20 @@ func WithOutput(dir string) Option {
 // inside the execution context.
 type FilesKey string
 
+// Identifier stores information about a node that can uniquely identify it.
+type Identifier struct {
+	Index int
+	ID    network.Node
+	IP    string
+}
+
+func (id Identifier) String() string {
+	return fmt.Sprintf("%s@%s", id.ID, id.IP)
+}
+
+// Files is the structure stored in the context for the file mappers.
+type Files map[Identifier]interface{}
+
 // FileMapper gives a file path and a map function so that the engine can read
 // a file from the simulation node and map the content to a generic instance.
 type FileMapper struct {

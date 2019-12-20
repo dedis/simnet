@@ -36,6 +36,16 @@ func TestOption_Output(t *testing.T) {
 	require.Equal(t, filepath.Join(".config", "simnet"), options.output)
 }
 
+func TestOption_IdentifierString(t *testing.T) {
+	ident := Identifier{
+		Index: 1,
+		ID:    "node0",
+		IP:    "1.2.3.4",
+	}
+
+	require.Equal(t, "node0@1.2.3.4", ident.String())
+}
+
 func TestOption_FileMapper(t *testing.T) {
 	e := errors.New("oops")
 	options := NewOptions([]Option{WithFileMapper(FilesKey("abc"), FileMapper{
