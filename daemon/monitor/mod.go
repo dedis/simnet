@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -189,16 +187,7 @@ func (m *defaultMonitor) Stream() <-chan *types.StatsJSON {
 }
 
 func makeDockerClient(url string) (dockerapi.APIClient, error) {
-	// https://medium.com/@nate510/don-t-use-go-s-default-http-client-4804cb19f779
-	httpClient := &http.Client{
-		Timeout: DialTimeout,
-		Transport: &http.Transport{
-			Dial:                (&net.Dialer{Timeout: DialTimeout}).Dial,
-			TLSHandshakeTimeout: DialTimeout,
-		},
-	}
-
-	return dockerapi.NewClient(url, "", httpClient, nil)
+	return dockerapi.NewClient(url, "", nil, nil)
 }
 
 func findContainer(list []types.Container, name string) (types.Container, error) {
