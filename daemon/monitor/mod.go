@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +19,10 @@ import (
 	"github.com/docker/docker/api/types"
 	dockerapi "github.com/docker/docker/client"
 )
+
+var reRxBytes = regexp.MustCompile("RX bytes:([0-9]+)")
+var reTxBytes = regexp.MustCompile("TX bytes:([0-9]+)")
+var errNoMatch = errors.New("missing substring match")
 
 type monitor interface {
 	Start() error
@@ -29,6 +37,7 @@ type defaultMonitor struct {
 	closer        io.Closer
 	containerName string
 	clientFactory func() (dockerapi.APIClient, error)
+	netCmd        []string
 }
 
 func newMonitor(name string) *defaultMonitor {
@@ -37,6 +46,7 @@ func newMonitor(name string) *defaultMonitor {
 		closing:       make(chan struct{}),
 		containerName: name,
 		clientFactory: makeDockerClient,
+		netCmd:        []string{"ifconfig", DockerNetworkInterface},
 	}
 }
 
@@ -99,10 +109,58 @@ func (m *defaultMonitor) Start() error {
 				m.wg.Done()
 				return
 			case data := <-chanData:
+				// Network statistics need to be gather in a different way as
+				// Kubernetes uses a different container to gather the *pod*
+				// statistics.
+				err := m.gatherNetworkStats(data)
+				if err != nil {
+					fmt.Printf("Error when reading network stats: %v\n", err)
+				}
+
 				m.c <- data
 			}
 		}
 	}()
+
+	return nil
+}
+
+func parseUint64(re *regexp.Regexp, out *bytes.Buffer) (uint64, error) {
+	m := re.FindStringSubmatch(out.String())
+
+	if len(m) < 2 {
+		return 0, errNoMatch
+	}
+
+	return strconv.ParseUint(m[1], 10, 64)
+}
+
+func (m *defaultMonitor) gatherNetworkStats(data *types.StatsJSON) error {
+	out := new(bytes.Buffer)
+
+	cmd := exec.Command(m.netCmd[0], m.netCmd[1:]...)
+	cmd.Stdout = out
+
+	err := cmd.Run()
+	if err != nil {
+		return err
+	}
+
+	rx, err := parseUint64(reRxBytes, out)
+	if err != nil {
+		return err
+	}
+
+	tx, err := parseUint64(reTxBytes, out)
+	if err != nil {
+		return err
+	}
+
+	data.Networks = make(map[string]types.NetworkStats)
+	data.Networks[DockerNetworkInterface] = types.NetworkStats{
+		RxBytes: rx,
+		TxBytes: tx,
+	}
 
 	return nil
 }

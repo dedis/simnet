@@ -21,6 +21,7 @@ func TestMonitor_MakeDockerClient(t *testing.T) {
 
 func TestMonitor_Start(t *testing.T) {
 	monitor := newMonitor("bob")
+	monitor.netCmd = []string{"echo", "RX bytes:1234 TX bytes:4321"}
 
 	r, w := io.Pipe()
 	monitor.clientFactory = func() (dockerapi.APIClient, error) {
@@ -33,7 +34,26 @@ func TestMonitor_Start(t *testing.T) {
 
 	stats := <-monitor.Stream()
 	require.NotNil(t, stats)
+	require.NoError(t, monitor.Stop())
+	require.Equal(t, uint64(1234), stats.Networks[DockerNetworkInterface].RxBytes)
+	require.Equal(t, uint64(4321), stats.Networks[DockerNetworkInterface].TxBytes)
+}
 
+func TestMonitor_StartErrorNetCmd(t *testing.T) {
+	monitor := newMonitor("bob")
+	monitor.netCmd = []string{"false"}
+
+	r, w := io.Pipe()
+	monitor.clientFactory = func() (dockerapi.APIClient, error) {
+		return &testDockerClient{writer: w, reader: r}, nil
+	}
+	require.NoError(t, monitor.Start())
+
+	enc := json.NewEncoder(w)
+	require.NoError(t, enc.Encode(&types.StatsJSON{}))
+
+	stats := <-monitor.Stream()
+	require.NotNil(t, stats)
 	require.NoError(t, monitor.Stop())
 }
 
@@ -108,6 +128,20 @@ func TestMonitor_StartStreamError(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
 	}
+}
+
+func TestMonitor_GatherNetStatsFailures(t *testing.T) {
+	monitor := newMonitor("bob")
+	monitor.netCmd = []string{"echo", "RX bytes:abc"}
+
+	err := monitor.gatherNetworkStats(&types.StatsJSON{})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, errNoMatch))
+
+	monitor.netCmd = []string{"echo", "RX bytes:123 TX bytes:abc"}
+	err = monitor.gatherNetworkStats(&types.StatsJSON{})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, errNoMatch))
 }
 
 func TestMonitor_CloseError(t *testing.T) {
