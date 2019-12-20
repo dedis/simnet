@@ -11,6 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMain_MonitorFactory(t *testing.T) {
+	m := monitorFactory("bob")
+	require.NotNil(t, m)
+}
+
 func TestMain_Run(t *testing.T) {
 	c := make(chan *types.StatsJSON)
 	monitorFactory = func(string) monitor {

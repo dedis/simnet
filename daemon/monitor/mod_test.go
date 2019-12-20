@@ -14,9 +14,8 @@ import (
 )
 
 func TestMonitor_MakeDockerClient(t *testing.T) {
-	client, err := makeDockerClient()
-	require.NoError(t, err)
-	require.NotNil(t, client)
+	_, err := makeDockerClient("")
+	require.Error(t, err)
 }
 
 func TestMonitor_Start(t *testing.T) {
@@ -24,7 +23,7 @@ func TestMonitor_Start(t *testing.T) {
 	monitor.netCmd = []string{"echo", "RX bytes:1234 TX bytes:4321"}
 
 	r, w := io.Pipe()
-	monitor.clientFactory = func() (dockerapi.APIClient, error) {
+	monitor.clientFactory = func(url string) (dockerapi.APIClient, error) {
 		return &testDockerClient{writer: w, reader: r}, nil
 	}
 	require.NoError(t, monitor.Start())
@@ -44,7 +43,7 @@ func TestMonitor_StartErrorNetCmd(t *testing.T) {
 	monitor.netCmd = []string{"false"}
 
 	r, w := io.Pipe()
-	monitor.clientFactory = func() (dockerapi.APIClient, error) {
+	monitor.clientFactory = func(url string) (dockerapi.APIClient, error) {
 		return &testDockerClient{writer: w, reader: r}, nil
 	}
 	require.NoError(t, monitor.Start())
@@ -69,7 +68,7 @@ func TestMonitor_StartNoContainer(t *testing.T) {
 func TestMonitor_StartErrorFactory(t *testing.T) {
 	monitor := newMonitor("")
 	e := errors.New("factory error")
-	monitor.clientFactory = func() (dockerapi.APIClient, error) {
+	monitor.clientFactory = func(url string) (dockerapi.APIClient, error) {
 		return nil, e
 	}
 
@@ -81,7 +80,7 @@ func TestMonitor_StartErrorFactory(t *testing.T) {
 func TestMonitor_StartErrorList(t *testing.T) {
 	monitor := newMonitor("")
 	e := errors.New("list error")
-	monitor.clientFactory = func() (dockerapi.APIClient, error) {
+	monitor.clientFactory = func(url string) (dockerapi.APIClient, error) {
 		return &testDockerClient{errList: e}, nil
 	}
 
@@ -93,7 +92,7 @@ func TestMonitor_StartErrorList(t *testing.T) {
 func TestMonitor_StartErrorStats(t *testing.T) {
 	monitor := newMonitor("bob")
 	e := errors.New("stats error")
-	monitor.clientFactory = func() (dockerapi.APIClient, error) {
+	monitor.clientFactory = func(url string) (dockerapi.APIClient, error) {
 		return &testDockerClient{errStats: e}, nil
 	}
 
@@ -106,7 +105,7 @@ func TestMonitor_StartStreamError(t *testing.T) {
 	reader, writer := io.Pipe()
 
 	monitor := newMonitor("bob")
-	monitor.clientFactory = func() (dockerapi.APIClient, error) {
+	monitor.clientFactory = func(url string) (dockerapi.APIClient, error) {
 		return &testDockerClient{reader: reader}, nil
 	}
 
@@ -191,7 +190,7 @@ func (dc *testDockerClient) ContainerStats(ctx context.Context, container string
 	return ret, nil
 }
 
-func makeTestClientFactory() (dockerapi.APIClient, error) {
+func makeTestClientFactory(url string) (dockerapi.APIClient, error) {
 	r, w := io.Pipe()
 	return &testDockerClient{writer: w, reader: r}, nil
 }

@@ -1,10 +1,12 @@
 package sim
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -79,7 +81,15 @@ func TestTunnel_StartFailures(t *testing.T) {
 
 	err = tun.Start()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "timeout")
+	require.True(t, errors.Is(err, errTunnelTimeout))
+
+	// Expect an error if the current user cannot be read.
+	e := errors.New("current user error")
+	setMockBadCurrentUser(e)
+	defer setCurrentUser()
+	err = tun.Start()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
 }
 
 func TestTunnel_Stop(t *testing.T) {
@@ -127,6 +137,13 @@ func TestTunnel_StopFailures(t *testing.T) {
 	err = tun.Stop()
 	require.Error(t, err)
 	require.Equal(t, "operation not permitted", err.Error())
+
+	e := errors.New("find process error")
+	setMockBadFindProcess(e)
+	defer setFindProcess()
+	err = tun.Stop()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
 }
 
 type badReader struct {
@@ -135,4 +152,24 @@ type badReader struct {
 
 func (r badReader) Read([]byte) (int, error) {
 	return 0, r.err
+}
+
+func setCurrentUser() {
+	currentUser = user.Current
+}
+
+func setMockBadCurrentUser(err error) {
+	currentUser = func() (*user.User, error) {
+		return nil, err
+	}
+}
+
+func setFindProcess() {
+	findProcess = os.FindProcess
+}
+
+func setMockBadFindProcess(err error) {
+	findProcess = func(int) (*os.Process, error) {
+		return nil, err
+	}
 }

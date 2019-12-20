@@ -29,17 +29,13 @@ const (
 	// MessageInitDone is the message to look for to assume the tunnel is
 	// opened.
 	MessageInitDone = "Initialization Sequence Completed"
-
-	// FileNameCA is the name of the file where the public key of the CA will
-	// be written.
-	FileNameCA = "ca.crt"
-	// FileNameCert is the name of the file where the public of the client
-	// will be written.
-	FileNameCert = "client.crt"
-	// FileNameKey is the name of the file where the private key of the client
-	// will be written.
-	FileNameKey = "client.key"
 )
+
+// Defines package functions from the standard library to enable unit testing.
+var currentUser = user.Current
+var findProcess = os.FindProcess
+
+var errTunnelTimeout = errors.New("tunnel timeout")
 
 // Tunnel provides primitives to open and close a tunnel to a private network.
 type Tunnel interface {
@@ -120,7 +116,7 @@ func (v *DefaultTunnel) Start(opts ...TunOption) error {
 
 	defer file.Close()
 
-	usr, err := user.Current()
+	usr, err := currentUser()
 	if err != nil {
 		return err
 	}
@@ -173,7 +169,7 @@ func (v *DefaultTunnel) Start(opts ...TunOption) error {
 	for {
 		select {
 		case <-timeout:
-			return errors.New("tunnel timeout")
+			return errTunnelTimeout
 		default:
 			scanner := bufio.NewScanner(file)
 			for scanner.Scan() {
@@ -198,7 +194,7 @@ func (v *DefaultTunnel) Stop() error {
 	for scanner.Scan() {
 		pid, err := strconv.Atoi(scanner.Text())
 		if err == nil {
-			proc, err := os.FindProcess(pid)
+			proc, err := findProcess(pid)
 			if err != nil {
 				return err
 			}

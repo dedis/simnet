@@ -80,7 +80,7 @@ func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 
 	engine, err := newKubeEngine(restcfg, namespace, options)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("couldn't create the engine: %v", err)
 	}
 
 	return &Strategy{

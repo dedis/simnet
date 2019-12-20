@@ -24,6 +24,9 @@ var reRxBytes = regexp.MustCompile("RX bytes:([0-9]+)")
 var reTxBytes = regexp.MustCompile("TX bytes:([0-9]+)")
 var errNoMatch = errors.New("missing substring match")
 
+// DialTimeout is the timeout for the HTTP client to dial.
+const DialTimeout = 10 * time.Second
+
 type monitor interface {
 	Start() error
 	Stop() error
@@ -36,7 +39,7 @@ type defaultMonitor struct {
 	closing       chan struct{}
 	closer        io.Closer
 	containerName string
-	clientFactory func() (dockerapi.APIClient, error)
+	clientFactory func(url string) (dockerapi.APIClient, error)
 	netCmd        []string
 }
 
@@ -51,7 +54,7 @@ func newMonitor(name string) *defaultMonitor {
 }
 
 func (m *defaultMonitor) Start() error {
-	client, err := m.clientFactory()
+	client, err := m.clientFactory(fmt.Sprintf("unix://%s", DockerSocketPath))
 	if err != nil {
 		return err
 	}
@@ -185,18 +188,17 @@ func (m *defaultMonitor) Stream() <-chan *types.StatsJSON {
 	return m.c
 }
 
-func makeHTTPClient() *http.Client {
-	t := &http.Transport{
-		Dial: func(proto, addr string) (net.Conn, error) {
-			return net.DialTimeout("unix", DockerSocketPath, 10*time.Second)
+func makeDockerClient(url string) (dockerapi.APIClient, error) {
+	// https://medium.com/@nate510/don-t-use-go-s-default-http-client-4804cb19f779
+	httpClient := &http.Client{
+		Timeout: DialTimeout,
+		Transport: &http.Transport{
+			Dial:                (&net.Dialer{Timeout: DialTimeout}).Dial,
+			TLSHandshakeTimeout: DialTimeout,
 		},
 	}
 
-	return &http.Client{Transport: t}
-}
-
-func makeDockerClient() (dockerapi.APIClient, error) {
-	return dockerapi.NewClient("unix://"+DockerSocketPath, "", makeHTTPClient(), nil)
+	return dockerapi.NewClient(url, "", httpClient, nil)
 }
 
 func findContainer(list []types.Container, name string) (types.Container, error) {

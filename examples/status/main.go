@@ -23,13 +23,13 @@ type StatusSimulationRound struct{}
 
 // Execute will contact each known node and ask for its status.
 func (r StatusSimulationRound) Execute(ctx context.Context) error {
-	files := ctx.Value(kubernetes.FilesKey("private.toml")).(map[string]interface{})
-	idents := make([]*network.ServerIdentity, 0, len(files))
+	files := ctx.Value(kubernetes.FilesKey("private.toml")).(kubernetes.Files)
+	idents := make([]*network.ServerIdentity, len(files))
 
-	for ip, value := range files {
+	for id, value := range files {
 		si := value.(*network.ServerIdentity)
-		si.Address = network.NewAddress(network.TLS, ip+":7770")
-		idents = append(idents, si)
+		si.Address = network.NewAddress(network.TLS, fmt.Sprintf("%s:7770", id.IP))
+		idents[id.Index] = si
 	}
 
 	fmt.Print("Checking connectivity...")

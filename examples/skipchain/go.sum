@@ -255,8 +255,8 @@ go.dedis.ch/protobuf v1.0.5/go.mod h1:eIV4wicvi6JK0q/QnfIEGeSFNG0ZeB24kzut5+HaRL
 go.dedis.ch/protobuf v1.0.7/go.mod h1:pv5ysfkDX/EawiPqcW3ikOxsL5t+BqnV6xHSmE79KI4=
 go.dedis.ch/protobuf v1.0.11 h1:FTYVIEzY/bfl37lu3pR4lIj+F9Vp1jE8oh91VmxKgLo=
 go.dedis.ch/protobuf v1.0.11/go.mod h1:97QR256dnkimeNdfmURz0wAMNVbd1VmLXhG1CrTYrJ4=
-go.dedis.ch/simnet v0.0.0-20191220124520-7d7f61d5273f h1:o4A/uxlNQL72vPtGn1FgG1bkjxIuF6S1o33tNkRChwA=
-go.dedis.ch/simnet v0.0.0-20191220124520-7d7f61d5273f/go.mod h1:quCkZtNnlykQ3DeTaMXRU92XNMU/H3KqhIMMMQqCz6M=
+go.dedis.ch/simnet v0.0.0-20191220140849-f33a3e9cea87 h1:iDIHJJX3P/p+7u/hHPg9w7MBIf2B5Xk05gm5ScCHnH4=
+go.dedis.ch/simnet v0.0.0-20191220140849-f33a3e9cea87/go.mod h1:quCkZtNnlykQ3DeTaMXRU92XNMU/H3KqhIMMMQqCz6M=
 go.etcd.io/bbolt v1.3.3 h1:MUGmc65QhB3pIlaQ5bB4LwqSj6GIonVJXpZiaKNyaKk=
 go.etcd.io/bbolt v1.3.3/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.opencensus.io v0.21.0/go.mod h1:mSImk1erAIZhrmZN+AvHh14ztQfjbGwt4TtuofqLduU=

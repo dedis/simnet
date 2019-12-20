@@ -67,6 +67,11 @@ func TestStrategy_NewFailures(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), e.Error())
 
+	setMockBadClientConfig(nil, nil)
+	_, err = NewStrategy("")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "couldn't create the engine")
+
 	// Expect an error as the output directory cannot be created.
 	_, err = NewStrategy("", WithOutput("/abc"))
 	require.Error(t, err)
@@ -414,7 +419,7 @@ type badClientConfig struct {
 }
 
 func (c badClientConfig) ClientConfig() (*rest.Config, error) {
-	return nil, c.errRest
+	return &rest.Config{Host: ":"}, c.errRest
 }
 
 func (c badClientConfig) ConfigAccess() clientcmd.ConfigAccess {

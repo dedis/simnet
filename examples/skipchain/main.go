@@ -23,17 +23,20 @@ import (
 type skipchainSimulationRound struct{}
 
 func (r skipchainSimulationRound) Execute(ctx context.Context) error {
-	files := ctx.Value(kubernetes.FilesKey("private.toml")).(map[string]interface{})
-	idents := make([]*network.ServerIdentity, 0, len(files))
+	files := ctx.Value(kubernetes.FilesKey("private.toml")).(kubernetes.Files)
+	idents := make([]*network.ServerIdentity, len(files))
 
-	for ip, value := range files {
+	fmt.Println("\nRoster:")
+	for id, value := range files {
 		si := value.(*network.ServerIdentity)
-		si.Address = network.NewAddress(network.TLS, ip+":7770")
-		idents = append(idents, si)
+		si.Address = network.NewAddress(network.TLS, id.IP+":7770")
+		idents[id.Index] = si
+
+		fmt.Printf("%v\n", id)
 	}
+	fmt.Println("")
 
 	ro := onet.NewRoster(idents)
-	fmt.Printf("Roster: %v\n", ro.List)
 
 	client := skipchain.NewClient()
 	genesis, err := client.CreateGenesis(ro, 4, 32, skipchain.VerificationStandard, []byte("deadbeef"))
