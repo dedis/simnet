@@ -225,11 +225,9 @@ func (s *Strategy) WriteStats(filename string) error {
 func (s *Strategy) Clean() error {
 	errs := make([]error, 0, 2)
 
-	if s.tun != nil {
-		err := s.tun.Stop()
-		if err != nil {
-			errs = append(errs, err)
-		}
+	err := s.tun.Stop()
+	if err != nil {
+		errs = append(errs, err)
 	}
 
 	w, err := s.engine.DeleteAll()

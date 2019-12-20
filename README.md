@@ -17,7 +17,7 @@ are built independently using the automated build of DockerHub.
 
 | Router | Router Init | Monitor |
 | ------ | ----------- | ------- |
-| [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-router/timeline) | [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-monitor?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-monitor/timeline) | [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router-init?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-router-init/timeline) |
+| [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-router/timeline) | [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router-init?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-router-init/timeline) | [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-monitor?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-monitor/timeline) |
 
 Docker images for the daemons have their own version that will trigger a build
 for each new version. The master branch will also build its own tag for each
@@ -33,6 +33,16 @@ The simulation uses strategies to manage the deployment and running of the round
 A kubernetes strategy is provided and used by default.
 
 TODO: Docker strategy for local simulations ?
+
+### Kubernetes
+
+When a simulation is deployed to a Kubernetes cluster, each instance of the
+application uses a POD that will contain the application Docker container
+alongside with a monitor container that will gather data for the statistics.
+
+One POD will also be used to deploy a router that will simply run OpenVPN so
+that the simulation can open a tunnel to the cluster network and thus make
+requests to the nodes.
 
 # How to
 

@@ -277,7 +277,7 @@ func TestStrategy_CleanWithFailure(t *testing.T) {
 	require.Contains(t, err.Error(), e.Error())
 
 	e = errors.New("delete all error")
-	stry.tun = nil
+	stry.tun = testTunnel{}
 	stry.engine = &testEngine{errDeleteAll: e}
 	err = stry.Clean()
 	require.Error(t, err)

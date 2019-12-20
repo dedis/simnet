@@ -302,8 +302,6 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string,
 				return nil, "", err
 			}
 
-			// TODO: this works only for a single node but it should detect
-			// what kind of cluster it is and use the correct service type.
 			return port, kd.host, nil
 		}
 
@@ -650,6 +648,8 @@ func (kd kubeEngine) makeRouterService() *apiv1.Service {
 					Protocol: apiv1.ProtocolUDP,
 				},
 			},
+			// NodePort type is selected so that a connection to the VPN can
+			// be established by using the host/IP taken from the configuration.
 			Type: apiv1.ServiceTypeNodePort,
 			Selector: map[string]string{
 				LabelID: RouterID,

@@ -44,7 +44,7 @@ func (r skipchainSimulationRound) Execute(ctx context.Context) error {
 	fmt.Printf("Genesis block %x created.\n", genesis.Hash)
 
 	data := make([]byte, 8)
-	n := 5
+	n := 50
 
 	for i := 0; i < n; i++ {
 		binary.LittleEndian.PutUint64(data, uint64(i))
@@ -86,8 +86,9 @@ func main() {
 		),
 		kubernetes.WithTopology(
 			net.NewAreaTopology(
-				&net.Area{N: 3},
-				&net.Area{N: 4, X: 100, Y: 0, Latency: net.Delay{Value: 25 * time.Millisecond}},
+				&net.Area{N: 3, Latency: net.Delay{Value: 25 * time.Millisecond}},
+				&net.Area{N: 4, X: 50, Latency: net.Delay{Value: 25 * time.Millisecond}},
+				&net.Area{N: 4, Y: 50},
 			),
 		),
 		kubernetes.WithImage(
