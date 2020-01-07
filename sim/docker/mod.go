@@ -1,17 +1,20 @@
 package docker
 
 import (
+	"archive/tar"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
+	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
 )
@@ -29,9 +32,12 @@ type Strategy struct {
 	cli        client.APIClient
 	options    *sim.Options
 	containers []types.ContainerJSON
+	stats      *metrics.Stats
+	statsLock  sync.Mutex
 }
 
-func newStrategy(opts ...sim.Option) (*Strategy, error) {
+// NewStrategy creates a docker strategy for simulations.
+func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 	cli, err := client.NewEnvClient()
 	if err != nil {
 		return nil, err
@@ -42,6 +48,9 @@ func newStrategy(opts ...sim.Option) (*Strategy, error) {
 		cli:        cli,
 		options:    sim.NewOptions(opts),
 		containers: make([]types.ContainerJSON, 0),
+		stats: &metrics.Stats{
+			Nodes: make(map[string]metrics.NodeStats),
+		},
 	}, nil
 }
 
@@ -109,6 +118,8 @@ func (s *Strategy) Deploy() error {
 
 	time.Sleep(1 * time.Second)
 
+	fmt.Fprintln(s.out, "Deployment done.")
+
 	return nil
 }
 
@@ -121,7 +132,13 @@ func (s *Strategy) makeExecutionContext() (context.Context, error) {
 		for i, container := range s.containers {
 			reader, _, err := s.cli.CopyFromContainer(ctx, container.ID, "/root/.config/conode/private.toml")
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("couldn't copy file: %v", err)
+			}
+
+			tr := tar.NewReader(reader)
+			_, err = tr.Next()
+			if err != nil {
+				return nil, fmt.Errorf("couldn't untar: %v", err)
 			}
 
 			ident := sim.Identifier{
@@ -130,10 +147,12 @@ func (s *Strategy) makeExecutionContext() (context.Context, error) {
 				IP:    container.NetworkSettings.DefaultNetworkSettings.IPAddress,
 			}
 
-			files[ident], err = fm.Mapper(reader)
+			files[ident], err = fm.Mapper(tr)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("mapper failed: %v", err)
 			}
+
+			reader.Close()
 		}
 
 		ctx = context.WithValue(ctx, key, files)
@@ -142,37 +161,93 @@ func (s *Strategy) makeExecutionContext() (context.Context, error) {
 	return ctx, nil
 }
 
+func (s *Strategy) monitorContainer(ctx context.Context, container types.ContainerJSON) (io.ReadCloser, error) {
+	resp, err := s.cli.ContainerStats(ctx, container.ID, true)
+	if err != nil {
+		return nil, err
+	}
+
+	dec := json.NewDecoder(resp.Body)
+
+	ns := &metrics.NodeStats{}
+
+	go func() {
+		for {
+			data := &types.StatsJSON{}
+			err := dec.Decode(data)
+			if err != nil {
+				return
+			}
+
+			ns.Timestamps = append(ns.Timestamps, time.Now().Unix())
+			ns.RxBytes = append(ns.RxBytes, data.Networks["eth0"].RxBytes)
+			ns.TxBytes = append(ns.TxBytes, data.Networks["eth0"].TxBytes)
+			ns.CPU = append(ns.CPU, data.CPUStats.CPUUsage.TotalUsage)
+			ns.Memory = append(ns.Memory, data.MemoryStats.Usage)
+
+			s.statsLock.Lock()
+			s.stats.Nodes[container.Name] = *ns
+			s.statsLock.Unlock()
+		}
+	}()
+
+	return resp.Body, nil
+}
+
 // Execute takes the round and execute it against the context created from the
 // options.
 func (s *Strategy) Execute(round sim.Round) error {
 	ctx, err := s.makeExecutionContext()
 	if err != nil {
-		return err
+		return fmt.Errorf("couldn't create the context: %v", err)
+	}
+
+	closers := make([]io.ReadCloser, 0, len(s.containers))
+
+	// It's important to close any existing stream even if an error
+	// occurred.
+	defer func() {
+		for _, closer := range closers {
+			closer.Close()
+		}
+	}()
+
+	for _, container := range s.containers {
+		closer, err := s.monitorContainer(context.Background(), container)
+		if err != nil {
+			return err
+		}
+
+		closers = append(closers, closer)
 	}
 
 	err = round.Execute(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("couldn't execute: %v", err)
 	}
+
+	fmt.Fprintln(s.out, "Execution done.")
 
 	return nil
 }
 
 // WriteStats writes the statistics of the nodes to the file.
 func (s *Strategy) WriteStats(filename string) error {
-	ctx := context.Background()
+	s.statsLock.Lock()
+	defer s.statsLock.Unlock()
 
-	for _, container := range s.containers {
-		out, err := s.cli.ContainerLogs(ctx, container.ID, types.ContainerLogsOptions{
-			ShowStdout: true,
-			ShowStderr: true,
-		})
-		if err != nil {
-			return fmt.Errorf("couldn't get the logs: %v", err)
-		}
-
-		stdcopy.StdCopy(os.Stdout, os.Stderr, out)
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
 	}
+
+	enc := json.NewEncoder(file)
+	err = enc.Encode(s.stats)
+	if err != nil {
+		return fmt.Errorf("couldn't encode the stats: %v", err)
+	}
+
+	fmt.Fprintln(s.out, "Statistics written.")
 
 	return nil
 }
@@ -200,6 +275,8 @@ func (s *Strategy) Clean() error {
 	if len(errs) > 0 {
 		return fmt.Errorf("couldn't remove the containers: %v", errs)
 	}
+
+	fmt.Fprintln(s.out, "Cleaning done.")
 
 	return nil
 }
