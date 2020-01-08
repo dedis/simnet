@@ -39,7 +39,7 @@ func TestEngine_NewFailures(t *testing.T) {
 	setMockBadClient()
 	defer setMockClient()
 
-	engine, err = newKubeEngine(nil, "", &Options{})
+	engine, err = newKubeEngine(nil, "", &sim.Options{})
 	require.Error(t, err)
 	require.Equal(t, "client: client error", err.Error())
 	require.Nil(t, engine)
@@ -48,8 +48,12 @@ func TestEngine_NewFailures(t *testing.T) {
 func TestEngine_CreateDeployments(t *testing.T) {
 	n := 3
 	engine, client := makeEngine(n)
+	engine.options.Ports = []sim.Port{
+		sim.NewTCP(2000),
+		sim.NewUDP(20001),
+	}
 
-	w, err := engine.CreateDeployment(apiv1.Container{})
+	w, err := engine.CreateDeployment()
 	require.NoError(t, err)
 	defer w.Stop()
 
@@ -86,7 +90,7 @@ func TestEngine_CreateDeploymentFailure(t *testing.T) {
 	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
 		return true, nil, e
 	})
-	_, err := engine.CreateDeployment(apiv1.Container{})
+	_, err := engine.CreateDeployment()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
@@ -95,7 +99,7 @@ func TestEngine_CreateDeploymentFailure(t *testing.T) {
 	e = errors.New("watcher error")
 	client.PrependWatchReactor("*", testcore.DefaultWatchReactor(fw, e))
 
-	_, err = engine.CreateDeployment(apiv1.Container{})
+	_, err = engine.CreateDeployment()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }
@@ -387,7 +391,7 @@ func TestEngine_FetchCertificates(t *testing.T) {
 	require.NoError(t, err)
 
 	engine := newKubeEngineTest(client, "", 0)
-	engine.outDir = dir
+	engine.options.OutputDir = dir
 
 	certs, err := engine.FetchCertificates()
 	require.NoError(t, err)
@@ -587,8 +591,10 @@ func newKubeEngineTest(client kubernetes.Interface, ns string, n int) *kubeEngin
 		writer:    bytes.NewBuffer(nil),
 		client:    client,
 		namespace: ns,
-		topology:  network.NewSimpleTopology(n, 50*time.Millisecond),
-		fs:        &testFS{reader: r, writer: w},
+		options: &sim.Options{
+			Topology: network.NewSimpleTopology(n, 50*time.Millisecond),
+		},
+		fs: &testFS{reader: r, writer: w},
 	}
 }
 

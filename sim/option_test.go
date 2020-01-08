@@ -1,4 +1,4 @@
-package kubernetes
+package sim
 
 import (
 	"errors"
@@ -9,20 +9,19 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/simnet/network"
-	apiv1 "k8s.io/api/core/v1"
 )
 
 func TestOption_Output(t *testing.T) {
 	// With a value
 	options := NewOptions([]Option{WithOutput("abc")})
-	require.Equal(t, "abc", options.output)
+	require.Equal(t, "abc", options.OutputDir)
 
 	// Default with working home directory
 	homeDir, err := os.UserHomeDir()
 	require.NoError(t, err)
 
 	options = NewOptions([]Option{WithOutput("")})
-	require.Equal(t, filepath.Join(homeDir, ".config", "simnet"), options.output)
+	require.Equal(t, filepath.Join(homeDir, ".config", "simnet"), options.OutputDir)
 
 	// Default with home directory not accessible.
 	userHomeDir = func() (string, error) {
@@ -33,7 +32,7 @@ func TestOption_Output(t *testing.T) {
 	}()
 
 	options = NewOptions([]Option{WithOutput("")})
-	require.Equal(t, filepath.Join(".config", "simnet"), options.output)
+	require.Equal(t, filepath.Join(".config", "simnet"), options.OutputDir)
 }
 
 func TestOption_IdentifierString(t *testing.T) {
@@ -55,13 +54,13 @@ func TestOption_FileMapper(t *testing.T) {
 		},
 	})})
 
-	fm, ok := options.files[FilesKey("abc")]
+	fm, ok := options.Files[FilesKey("abc")]
 	require.True(t, ok)
 	require.Equal(t, "/path/to/file", fm.Path)
 	_, err := fm.Mapper(nil)
 	require.Equal(t, e, err)
 
-	fm, ok = options.files[FilesKey("")]
+	fm, ok = options.Files[FilesKey("")]
 	require.False(t, ok)
 }
 
@@ -69,7 +68,7 @@ func TestOption_Topology(t *testing.T) {
 	topo := network.NewSimpleTopology(5, 0)
 	options := NewOptions([]Option{WithTopology(topo)})
 
-	require.Equal(t, topo.Len(), options.topology.Len())
+	require.Equal(t, topo.Len(), options.Topology.Len())
 }
 
 func TestOption_Image(t *testing.T) {
@@ -82,14 +81,13 @@ func TestOption_Image(t *testing.T) {
 		NewTCP(3001),
 	)})
 
-	require.Equal(t, ContainerAppName, options.container.Name)
-	require.Equal(t, "path/to/image", options.container.Image)
-	require.Equal(t, "cmd", options.container.Command[0])
-	require.Equal(t, []string{"arg1", "arg2"}, options.container.Args)
-	require.Equal(t, apiv1.ProtocolTCP, options.container.Ports[0].Protocol)
-	require.Equal(t, int32(2000), options.container.Ports[0].ContainerPort)
-	require.Equal(t, apiv1.ProtocolUDP, options.container.Ports[1].Protocol)
-	require.Equal(t, int32(3000), options.container.Ports[1].ContainerPort)
-	require.Equal(t, apiv1.ProtocolTCP, options.container.Ports[2].Protocol)
-	require.Equal(t, int32(3001), options.container.Ports[2].ContainerPort)
+	require.Equal(t, "path/to/image", options.Image)
+	require.Equal(t, "cmd", options.Cmd[0])
+	require.Equal(t, []string{"arg1", "arg2"}, options.Args)
+	require.Equal(t, TCP, options.Ports[0].Protocol())
+	require.Equal(t, int32(2000), options.Ports[0].Value())
+	require.Equal(t, UDP, options.Ports[1].Protocol())
+	require.Equal(t, int32(3000), options.Ports[1].Value())
+	require.Equal(t, TCP, options.Ports[2].Protocol())
+	require.Equal(t, int32(3001), options.Ports[2].Value())
 }

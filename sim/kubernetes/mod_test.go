@@ -73,7 +73,7 @@ func TestStrategy_NewFailures(t *testing.T) {
 	require.Contains(t, err.Error(), "couldn't create the engine")
 
 	// Expect an error as the output directory cannot be created.
-	_, err = NewStrategy("", WithOutput("/abc"))
+	_, err = NewStrategy("", sim.WithOutput("/abc"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "couldn't create the data folder")
 }
@@ -82,7 +82,7 @@ func TestStrategy_DeployWithFailures(t *testing.T) {
 	deployer := &testEngine{}
 	stry := &Strategy{
 		engine:  deployer,
-		options: NewOptions(nil),
+		options: sim.NewOptions(nil),
 		tun:     testTunnel{},
 	}
 
@@ -134,9 +134,9 @@ func TestStrategy_DeployWithFailures(t *testing.T) {
 }
 
 func TestStrategy_Execute(t *testing.T) {
-	key := FilesKey("a")
-	options := []Option{
-		WithFileMapper(key, FileMapper{
+	key := sim.FilesKey("a")
+	options := []sim.Option{
+		sim.WithFileMapper(key, sim.FileMapper{
 			Path: "/a/file/path",
 			Mapper: func(io.Reader) (interface{}, error) {
 				return "content", nil
@@ -150,14 +150,14 @@ func TestStrategy_Execute(t *testing.T) {
 			{ObjectMeta: metav1.ObjectMeta{Name: "b"}, Status: apiv1.PodStatus{PodIP: "b.b.b.b"}},
 		},
 		engine:  &testEngine{},
-		options: NewOptions(options),
+		options: sim.NewOptions(options),
 	}
 
 	done := make(chan struct{}, 1)
 	h := func(ctx context.Context) {
-		contents := ctx.Value(key).(Files)
+		contents := ctx.Value(key).(sim.Files)
 		require.Equal(t, len(stry.pods), len(contents))
-		require.Equal(t, "content", contents[Identifier{Index: 0, ID: "a", IP: "a.a.a.a"}])
+		require.Equal(t, "content", contents[sim.Identifier{Index: 0, ID: "a", IP: "a.a.a.a"}])
 
 		done <- struct{}{}
 	}
@@ -176,8 +176,8 @@ func TestStrategy_Execute(t *testing.T) {
 func TestStrategy_ExecuteFailure(t *testing.T) {
 	e := errors.New("read error")
 	e2 := errors.New("mapper error")
-	options := []Option{
-		WithFileMapper(FilesKey(""), FileMapper{
+	options := []sim.Option{
+		sim.WithFileMapper(sim.FilesKey(""), sim.FileMapper{
 			Path: "/a/file/path",
 			Mapper: func(io.Reader) (interface{}, error) {
 				return nil, e2
@@ -188,7 +188,7 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 	stry := &Strategy{
 		pods:    []apiv1.Pod{{}},
 		engine:  &testEngine{errRead: e},
-		options: NewOptions(options),
+		options: sim.NewOptions(options),
 	}
 
 	err := stry.Execute(testRound{})
@@ -200,7 +200,7 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, e2, err)
 
-	stry.options = NewOptions([]Option{})
+	stry.options = sim.NewOptions([]sim.Option{})
 	e = errors.New("round error")
 	err = stry.Execute(testRound{err: e})
 	require.True(t, errors.Is(err, e))
@@ -216,8 +216,8 @@ func TestStrategy_WriteStats(t *testing.T) {
 		pods:        []apiv1.Pod{{}},
 		engine:      &testEngine{reader: reader},
 		makeEncoder: makeJSONEncoder,
-		options: &Options{
-			output: dir,
+		options: &sim.Options{
+			OutputDir: dir,
 		},
 	}
 
@@ -236,7 +236,7 @@ func TestStrategy_WriteStatsFailures(t *testing.T) {
 	stry := &Strategy{
 		pods:    []apiv1.Pod{{}},
 		engine:  &testEngine{errRead: e},
-		options: &Options{},
+		options: &sim.Options{},
 	}
 
 	err := stry.WriteStats("")
@@ -254,7 +254,7 @@ func TestStrategy_WriteStatsFailures(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	stry.makeEncoder = newBadEncoder
-	stry.options.output = dir
+	stry.options.OutputDir = dir
 	err = stry.WriteStats("data.json")
 	require.Error(t, err)
 	require.Equal(t, "encoding error", err.Error())
@@ -314,7 +314,7 @@ type testEngine struct {
 	errRead           error
 }
 
-func (te *testEngine) CreateDeployment(container apiv1.Container) (watch.Interface, error) {
+func (te *testEngine) CreateDeployment() (watch.Interface, error) {
 	return watch.NewFake(), te.errDeployment
 }
 

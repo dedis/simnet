@@ -28,7 +28,6 @@ const (
 	ContainerRouterName = "router"
 )
 
-var userHomeDir = os.UserHomeDir
 var newClientConfig = clientcmd.NewNonInteractiveDeferredLoadingClientConfig
 
 // Encoder is the interface used to instantiate the encoder that will write
@@ -45,7 +44,7 @@ func makeJSONEncoder(w io.Writer) Encoder {
 type Strategy struct {
 	engine      engine
 	namespace   string
-	options     *Options
+	options     *sim.Options
 	pods        []apiv1.Pod
 	tun         sim.Tunnel
 	executeTime time.Time
@@ -54,11 +53,11 @@ type Strategy struct {
 }
 
 // NewStrategy creates a new simulation engine.
-func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
-	options := NewOptions(opts)
+func NewStrategy(cfg string, opts ...sim.Option) (*Strategy, error) {
+	options := sim.NewOptions(opts)
 
 	// Create the directory where the data will be stored.
-	err := os.MkdirAll(options.output, 0755)
+	err := os.MkdirAll(options.OutputDir, 0755)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't create the data folder: %v", err)
 	}
@@ -85,7 +84,7 @@ func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 
 	return &Strategy{
 		engine:      engine,
-		tun:         sim.NewDefaultTunnel(options.output),
+		tun:         sim.NewDefaultTunnel(options.OutputDir),
 		namespace:   namespace,
 		options:     options,
 		makeEncoder: makeJSONEncoder,
@@ -95,7 +94,7 @@ func NewStrategy(cfg string, opts ...Option) (*Strategy, error) {
 // Deploy will create a deployment on the Kubernetes cluster. A pod will then
 // be assigned to simulation nodes.
 func (s *Strategy) Deploy() error {
-	w, err := s.engine.CreateDeployment(s.options.container)
+	w, err := s.engine.CreateDeployment()
 	if err != nil {
 		return err
 	}
@@ -149,8 +148,8 @@ func (s *Strategy) Deploy() error {
 func (s *Strategy) makeContext() (context.Context, error) {
 	ctx := context.Background()
 
-	for key, fm := range s.options.files {
-		files := make(Files)
+	for key, fm := range s.options.Files {
+		files := make(sim.Files)
 
 		for i, pod := range s.pods {
 			reader, err := s.engine.ReadFile(pod.Name, fm.Path)
@@ -158,7 +157,7 @@ func (s *Strategy) makeContext() (context.Context, error) {
 				return nil, err
 			}
 
-			ident := Identifier{
+			ident := sim.Identifier{
 				Index: i,
 				ID:    network.Node(pod.Name),
 				IP:    pod.Status.PodIP,
@@ -212,7 +211,7 @@ func (s *Strategy) WriteStats(filename string) error {
 		stats.Nodes[pod.Name] = ns
 	}
 
-	f, err := os.Create(filepath.Join(s.options.output, filename))
+	f, err := os.Create(filepath.Join(s.options.OutputDir, filename))
 	if err != nil {
 		return err
 	}

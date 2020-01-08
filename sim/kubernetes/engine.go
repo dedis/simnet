@@ -93,7 +93,7 @@ var (
 var newClient = kubernetes.NewForConfig
 
 type engine interface {
-	CreateDeployment(container apiv1.Container) (watch.Interface, error)
+	CreateDeployment() (watch.Interface, error)
 	WaitDeployment(watch.Interface) error
 	FetchPods() ([]apiv1.Pod, error)
 	UploadConfig() error
@@ -108,8 +108,7 @@ type engine interface {
 
 type kubeEngine struct {
 	writer    io.Writer
-	outDir    string
-	topology  network.Topology
+	options   *sim.Options
 	host      string
 	namespace string
 	config    *rest.Config
@@ -118,7 +117,7 @@ type kubeEngine struct {
 	pods      []apiv1.Pod
 }
 
-func newKubeEngine(config *rest.Config, ns string, options *Options) (*kubeEngine, error) {
+func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeEngine, error) {
 	client, err := newClient(config)
 	if err != nil {
 		return nil, fmt.Errorf("client: %v", err)
@@ -131,8 +130,7 @@ func newKubeEngine(config *rest.Config, ns string, options *Options) (*kubeEngin
 
 	return &kubeEngine{
 		writer:    os.Stdout,
-		outDir:    options.output,
-		topology:  options.topology,
+		options:   options,
 		namespace: ns,
 		host:      u.Hostname(),
 		config:    config,
@@ -145,7 +143,42 @@ func newKubeEngine(config *rest.Config, ns string, options *Options) (*kubeEngin
 	}, nil
 }
 
-func (kd kubeEngine) CreateDeployment(container apiv1.Container) (watch.Interface, error) {
+func (kd kubeEngine) makeContainer() apiv1.Container {
+	pp := make([]apiv1.ContainerPort, len(kd.options.Ports))
+	for i, port := range kd.options.Ports {
+		if port.Protocol() == sim.TCP {
+			pp[i] = apiv1.ContainerPort{
+				Protocol:      apiv1.ProtocolTCP,
+				ContainerPort: port.Value(),
+			}
+		} else if port.Protocol() == sim.UDP {
+			pp[i] = apiv1.ContainerPort{
+				Protocol:      apiv1.ProtocolUDP,
+				ContainerPort: port.Value(),
+			}
+		}
+	}
+
+	return apiv1.Container{
+		Name:    ContainerAppName,
+		Image:   kd.options.Image,
+		Command: kd.options.Cmd,
+		Args:    kd.options.Args,
+		Ports:   pp,
+		Resources: apiv1.ResourceRequirements{
+			Requests: apiv1.ResourceList{
+				"memory": AppRequestMemory,
+				"cpu":    AppRequestCPU,
+			},
+			Limits: apiv1.ResourceList{
+				"memory": AppLimitMemory,
+				"cpu":    AppLimitCPU,
+			},
+		},
+	}
+}
+
+func (kd kubeEngine) CreateDeployment() (watch.Interface, error) {
 	fmt.Fprint(kd.writer, "Creating deployment...")
 
 	intf := kd.client.AppsV1().Deployments(kd.namespace)
@@ -161,8 +194,8 @@ func (kd kubeEngine) CreateDeployment(container apiv1.Container) (watch.Interfac
 		return nil, err
 	}
 
-	for _, node := range kd.topology.GetNodes() {
-		deployment := makeDeployment(node.String(), container)
+	for _, node := range kd.options.Topology.GetNodes() {
+		deployment := makeDeployment(node.String(), kd.makeContainer())
 
 		_, err = intf.Create(deployment)
 		if err != nil {
@@ -189,7 +222,7 @@ func (kd *kubeEngine) WaitDeployment(w watch.Interface) error {
 			readyMap[dpl.Name] = struct{}{}
 		}
 
-		if len(readyMap) == kd.topology.Len() {
+		if len(readyMap) == kd.options.Topology.Len() {
 			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... ok"))
 			return nil
 		}
@@ -213,8 +246,8 @@ func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 		return nil, err
 	}
 
-	if len(pods.Items) != kd.topology.Len() {
-		return nil, fmt.Errorf("invalid number of pods: %d vs %d", len(pods.Items), kd.topology.Len())
+	if len(pods.Items) != kd.options.Topology.Len() {
+		return nil, fmt.Errorf("invalid number of pods: %d vs %d", len(pods.Items), kd.options.Topology.Len())
 	}
 
 	fmt.Fprintln(kd.writer, goterm.ResetLine("Fetching pods... ok"))
@@ -243,7 +276,7 @@ func (kd *kubeEngine) UploadConfig() error {
 		node := network.Node(pod.Labels[LabelNode])
 
 		enc := json.NewEncoder(writer)
-		err = enc.Encode(kd.topology.Rules(node, mapping))
+		err = enc.Encode(kd.options.Topology.Rules(node, mapping))
 
 		// In any case, the writer is closed.
 		writer.Close()
@@ -366,9 +399,9 @@ func (kd *kubeEngine) FetchCertificates() (sim.Certificates, error) {
 
 	// This defines where the files will be written on the client side.
 	certs := sim.Certificates{
-		CA:   filepath.Join(kd.outDir, "ca.crt"),
-		Key:  filepath.Join(kd.outDir, "client.key"),
-		Cert: filepath.Join(kd.outDir, "client.crt"),
+		CA:   filepath.Join(kd.options.OutputDir, "ca.crt"),
+		Key:  filepath.Join(kd.options.OutputDir, "client.key"),
+		Cert: filepath.Join(kd.options.OutputDir, "client.crt"),
 	}
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
@@ -448,7 +481,7 @@ func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) err
 				countDeleted++
 			}
 
-			if countDeleted >= kd.topology.Len()+1 {
+			if countDeleted >= kd.options.Topology.Len()+1 {
 				// No more replicas so the deployment is deleted.
 				return nil
 			}

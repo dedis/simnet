@@ -3,18 +3,23 @@ package sim
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 
 	"go.dedis.ch/simnet/network"
 )
 
+var userHomeDir = os.UserHomeDir
+
 // Options contains the different options for a simulation execution.
 type Options struct {
-	Files    map[interface{}]FileMapper
-	Topology network.Topology
-	Image    string
-	Cmd      []string
-	Args     []string
-	Ports    []Port
+	OutputDir string
+	Files     map[interface{}]FileMapper
+	Topology  network.Topology
+	Image     string
+	Cmd       []string
+	Args      []string
+	Ports     []Port
 }
 
 // NewOptions creates empty options.
@@ -31,11 +36,30 @@ func NewOptions(opts []Option) *Options {
 		o.Topology = network.NewSimpleTopology(3, 0)
 	}
 
+	if o.OutputDir == "" {
+		homeDir, err := userHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Couldn't get the user home directory: %v\n", err)
+			// Default to relative folder if the home directory cannot be found.
+			homeDir = ""
+		}
+
+		o.OutputDir = filepath.Join(homeDir, ".config", "simnet")
+	}
+
 	return o
 }
 
 // Option is a function that changes the global options.
 type Option func(opts *Options)
+
+// WithOutput is an option to change the default directory that will be used
+// to write data about the simulation.
+func WithOutput(dir string) Option {
+	return func(opts *Options) {
+		opts.OutputDir = dir
+	}
+}
 
 // FilesKey is the kind of key that will be used to retrieve the files
 // inside the execution context.
@@ -79,47 +103,61 @@ func WithTopology(topo network.Topology) Option {
 	}
 }
 
+// Protocol is the type of the keys for the protocols.
+type Protocol string
+
+const (
+	// TCP is the key for the TCP protocol.
+	TCP = Protocol("TCP")
+	// UDP is the key for the UDP protocol.
+	UDP = Protocol("UDP")
+)
+
 // Port is a parameter for the container image to open a port with a given
 // protocol. It can also be a range.
 type Port interface {
-	Protocol() string
+	Protocol() Protocol
 	Value() int32
 }
 
-// TCP is a single TCP port.
-type TCP struct {
+// TCPPort is a single TCPPort port.
+type TCPPort struct {
 	port int32
 }
 
 // NewTCP creates a new tcp port.
-func NewTCP(port int32) TCP {
-	return TCP{port: port}
+func NewTCP(port int32) TCPPort {
+	return TCPPort{port: port}
 }
 
-func (tcp TCP) Protocol() string {
-	return "TCP"
+// Protocol returns the protocol key for TCP.
+func (p TCPPort) Protocol() Protocol {
+	return TCP
 }
 
-func (tcp TCP) Value() int32 {
-	return tcp.port
+// Value returns the integer value of the port.
+func (p TCPPort) Value() int32 {
+	return p.port
 }
 
-// UDP is a single udp port.
-type UDP struct {
+// UDPPort is a single udp port.
+type UDPPort struct {
 	port int32
 }
 
 // NewUDP creates a new udp port.
-func NewUDP(port int32) UDP {
-	return UDP{port: port}
+func NewUDP(port int32) UDPPort {
+	return UDPPort{port: port}
 }
 
-func (udp UDP) Protocol() string {
-	return "UDP"
+// Protocol returns the protocol key for UDP.
+func (p UDPPort) Protocol() Protocol {
+	return UDP
 }
 
-func (udp UDP) Value() int32 {
-	return udp.port
+// Value returns the integer value of the port.
+func (p UDPPort) Value() int32 {
+	return p.port
 }
 
 // WithImage is an option for simulation engines to use this Docker image as
