@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -30,6 +31,18 @@ const (
 	ExecWaitTimeout = 10 * time.Second
 )
 
+// Encoder is the function used to encode the statistics in a given format.
+type Encoder func(io.Writer, *metrics.Stats) error
+
+func jsonEncoder(writer io.Writer, stats *metrics.Stats) error {
+	enc := json.NewEncoder(writer)
+	return enc.Encode(stats)
+}
+
+var makeDockerClient = func() (client.APIClient, error) {
+	return client.NewEnvClient()
+}
+
 // Strategy implements the strategy interface for running simulations inside a
 // Docker environment.
 type Strategy struct {
@@ -39,11 +52,12 @@ type Strategy struct {
 	containers []types.ContainerJSON
 	stats      *metrics.Stats
 	statsLock  sync.Mutex
+	encoder    Encoder
 }
 
 // NewStrategy creates a docker strategy for simulations.
 func NewStrategy(opts ...sim.Option) (*Strategy, error) {
-	cli, err := client.NewEnvClient()
+	cli, err := makeDockerClient()
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +70,7 @@ func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 		stats: &metrics.Stats{
 			Nodes: make(map[string]metrics.NodeStats),
 		},
+		encoder: jsonEncoder,
 	}, nil
 }
 
@@ -67,7 +82,7 @@ func (s *Strategy) pullImage(ctx context.Context) error {
 		return err
 	}
 
-	io.Copy(s.out, reader) // ignore potential errors.
+	io.Copy(s.out, reader) // TODO: parse status
 
 	return nil
 }
@@ -85,8 +100,12 @@ func (s *Strategy) createContainer(ctx context.Context) error {
 		ExposedPorts: ports,
 	}
 
+	hcfg := &container.HostConfig{
+		AutoRemove: true,
+	}
+
 	for _, node := range s.options.Topology.GetNodes() {
-		resp, err := s.cli.ContainerCreate(ctx, cfg, nil, nil, node.String())
+		resp, err := s.cli.ContainerCreate(ctx, cfg, hcfg, nil, node.String())
 		if err != nil {
 			return err
 		}
@@ -107,8 +126,8 @@ func (s *Strategy) createContainer(ctx context.Context) error {
 	return nil
 }
 
-func waitExec(execID string, msgCh <-chan events.Message, errCh <-chan error) error {
-	timeout := time.After(ExecWaitTimeout)
+func waitExec(execID string, msgCh <-chan events.Message, errCh <-chan error, t time.Duration) error {
+	timeout := time.After(t)
 
 	for {
 		select {
@@ -145,12 +164,12 @@ func (s *Strategy) configureContainer(
 
 	resp, err := s.cli.ContainerCreate(ctx, cfg, hcfg, nil, "")
 	if err != nil {
-		return fmt.Errorf("couldn't create netem container: %v", err)
+		return fmt.Errorf("couldn't create netem container: %w", err)
 	}
 
 	err = s.cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{})
 	if err != nil {
-		return fmt.Errorf("couldn't start netem container: %v", err)
+		return fmt.Errorf("couldn't start netem container: %w", err)
 	}
 
 	rules := s.options.Topology.Rules(network.Node(c.Name[1:]), mapping)
@@ -163,41 +182,41 @@ func (s *Strategy) configureContainer(
 	}
 	exec, err := s.cli.ContainerExecCreate(ctx, resp.ID, ecfg)
 	if err != nil {
-		return fmt.Errorf("couldn't create exec: %v", err)
+		return fmt.Errorf("couldn't create exec: %w", err)
 	}
 
 	conn, err := s.cli.ContainerExecAttach(ctx, exec.ID, types.ExecConfig{})
 	if err != nil {
-		return fmt.Errorf("couldn't attach to exec: %v", err)
+		return fmt.Errorf("couldn't attach to exec: %w", err)
 	}
 
 	defer conn.Close()
 
 	err = s.cli.ContainerExecStart(ctx, exec.ID, types.ExecStartCheck{})
 	if err != nil {
-		return fmt.Errorf("couldn't start exec: %v", err)
+		return fmt.Errorf("couldn't start exec: %w", err)
 	}
 
 	defer func() {
 		timeout := ContainerStopTimeout
 		e := s.cli.ContainerStop(ctx, resp.ID, &timeout)
 		if e != nil {
-			err = fmt.Errorf("couldn't stop the container: %v", err)
+			err = fmt.Errorf("couldn't stop the container: %w", e)
 		}
 	}()
 
 	enc := json.NewEncoder(conn.Conn)
 	err = enc.Encode(&rules)
 	if err != nil {
-		return fmt.Errorf("couldn't encode the rules: %v", err)
+		return fmt.Errorf("couldn't encode the rules: %w", err)
 	}
 
 	// Output from the monitor container executing the netem tool.
 	// io.Copy(ioutil.Discard, conn.Reader)
 
-	err = waitExec(exec.ID, msgCh, errCh)
+	err = waitExec(exec.ID, msgCh, errCh, ExecWaitTimeout)
 	if err != nil {
-		return fmt.Errorf("couldn't apply rule: %v", err)
+		return fmt.Errorf("couldn't apply rule: %w", err)
 	}
 
 	return
@@ -206,7 +225,7 @@ func (s *Strategy) configureContainer(
 func (s *Strategy) configureContainers(ctx context.Context) error {
 	reader, err := s.cli.ImagePull(ctx, "docker.io/dedis/simnet-monitor:latest", types.ImagePullOptions{})
 	if err != nil {
-		return fmt.Errorf("couldn't pull netem image: %v", err)
+		return fmt.Errorf("couldn't pull netem image: %w", err)
 	}
 
 	io.Copy(s.out, reader) // TODO: parse
@@ -244,17 +263,17 @@ func (s *Strategy) Deploy() error {
 
 	err := s.pullImage(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't pull the image: %v", err)
+		return fmt.Errorf("couldn't pull the image: %w", err)
 	}
 
 	err = s.createContainer(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't create the container: %v", err)
+		return fmt.Errorf("couldn't create the container: %w", err)
 	}
 
 	err = s.configureContainers(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't configure the containers: %v", err)
+		return fmt.Errorf("couldn't configure the containers: %w", err)
 	}
 
 	fmt.Fprintln(s.out, "Deployment done.")
@@ -269,15 +288,15 @@ func (s *Strategy) makeExecutionContext() (context.Context, error) {
 		files := make(sim.Files)
 
 		for i, container := range s.containers {
-			reader, _, err := s.cli.CopyFromContainer(ctx, container.ID, "/root/.config/conode/private.toml")
+			reader, _, err := s.cli.CopyFromContainer(ctx, container.ID, fm.Path)
 			if err != nil {
-				return nil, fmt.Errorf("couldn't copy file: %v", err)
+				return nil, fmt.Errorf("couldn't copy file: %w", err)
 			}
 
 			tr := tar.NewReader(reader)
 			_, err = tr.Next()
 			if err != nil {
-				return nil, fmt.Errorf("couldn't untar: %v", err)
+				return nil, fmt.Errorf("couldn't untar: %w", err)
 			}
 
 			ident := sim.Identifier{
@@ -288,7 +307,7 @@ func (s *Strategy) makeExecutionContext() (context.Context, error) {
 
 			files[ident], err = fm.Mapper(tr)
 			if err != nil {
-				return nil, fmt.Errorf("mapper failed: %v", err)
+				return nil, fmt.Errorf("mapper failed: %w", err)
 			}
 
 			reader.Close()
@@ -300,21 +319,23 @@ func (s *Strategy) makeExecutionContext() (context.Context, error) {
 	return ctx, nil
 }
 
-func (s *Strategy) monitorContainer(ctx context.Context, container types.ContainerJSON) (io.ReadCloser, error) {
+func (s *Strategy) monitorContainer(ctx context.Context, container types.ContainerJSON) (func(), error) {
 	resp, err := s.cli.ContainerStats(ctx, container.ID, true)
 	if err != nil {
 		return nil, err
 	}
 
 	dec := json.NewDecoder(resp.Body)
-
 	ns := &metrics.NodeStats{}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 
 	go func() {
 		for {
 			data := &types.StatsJSON{}
 			err := dec.Decode(data)
 			if err != nil {
+				wg.Done()
 				return
 			}
 
@@ -330,7 +351,12 @@ func (s *Strategy) monitorContainer(ctx context.Context, container types.Contain
 		}
 	}()
 
-	return resp.Body, nil
+	closer := func() {
+		resp.Body.Close()
+		wg.Wait()
+	}
+
+	return closer, nil
 }
 
 // Execute takes the round and execute it against the context created from the
@@ -338,16 +364,16 @@ func (s *Strategy) monitorContainer(ctx context.Context, container types.Contain
 func (s *Strategy) Execute(round sim.Round) error {
 	ctx, err := s.makeExecutionContext()
 	if err != nil {
-		return fmt.Errorf("couldn't create the context: %v", err)
+		return fmt.Errorf("couldn't create the context: %w", err)
 	}
 
-	closers := make([]io.ReadCloser, 0, len(s.containers))
+	closers := make([]func(), 0, len(s.containers))
 
 	// It's important to close any existing stream even if an error
 	// occurred.
 	defer func() {
 		for _, closer := range closers {
-			closer.Close()
+			closer()
 		}
 	}()
 
@@ -362,7 +388,7 @@ func (s *Strategy) Execute(round sim.Round) error {
 
 	err = round.Execute(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't execute: %v", err)
+		return fmt.Errorf("couldn't execute: %w", err)
 	}
 
 	fmt.Fprintln(s.out, "Execution done.")
@@ -375,15 +401,14 @@ func (s *Strategy) WriteStats(filename string) error {
 	s.statsLock.Lock()
 	defer s.statsLock.Unlock()
 
-	file, err := os.Create(filename)
+	file, err := os.Create(filepath.Join(s.options.OutputDir, filename))
 	if err != nil {
 		return err
 	}
 
-	enc := json.NewEncoder(file)
-	err = enc.Encode(s.stats)
+	err = s.encoder(file, s.stats)
 	if err != nil {
-		return fmt.Errorf("couldn't encode the stats: %v", err)
+		return fmt.Errorf("couldn't encode the stats: %w", err)
 	}
 
 	fmt.Fprintln(s.out, "Statistics written.")
@@ -400,12 +425,6 @@ func (s *Strategy) Clean() error {
 
 	for _, container := range s.containers {
 		err := s.cli.ContainerStop(ctx, container.ID, &timeout)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-
-		err = s.cli.ContainerRemove(ctx, container.ID, types.ContainerRemoveOptions{})
 		if err != nil {
 			errs = append(errs, err)
 		}
