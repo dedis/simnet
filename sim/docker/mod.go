@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"go.dedis.ch/simnet/metrics"
@@ -22,7 +24,10 @@ import (
 const (
 	// ContainerStopTimeout is the maximum amount of time given to a container
 	// to stop.
-	ContainerStopTimeout = 10 * time.Second
+	ContainerStopTimeout = 2 * time.Second
+
+	// ExecWaitTimeout is the maximum amount of time given to an exec to end.
+	ExecWaitTimeout = 10 * time.Second
 )
 
 // Strategy implements the strategy interface for running simulations inside a
@@ -102,9 +107,140 @@ func (s *Strategy) createContainer(ctx context.Context) error {
 	return nil
 }
 
+func waitExec(execID string, msgCh <-chan events.Message, errCh <-chan error) error {
+	timeout := time.After(ExecWaitTimeout)
+
+	for {
+		select {
+		case msg := <-msgCh:
+			if msg.Status == "exec_die" && msg.Actor.Attributes["execID"] == execID {
+				code := msg.Actor.Attributes["exitCode"]
+				if code != "0" {
+					return fmt.Errorf("exit code %s", code)
+				}
+
+				return nil
+			}
+		case err := <-errCh:
+			return err
+		case <-timeout:
+			return errors.New("timeout")
+		}
+	}
+}
+
+func (s *Strategy) configureContainer(
+	ctx context.Context,
+	c types.ContainerJSON,
+	cfg *container.Config,
+	mapping map[network.Node]string,
+	msgCh <-chan events.Message,
+	errCh <-chan error,
+) (err error) {
+	hcfg := &container.HostConfig{
+		AutoRemove:  true,
+		CapAdd:      []string{"NET_ADMIN"},
+		NetworkMode: container.NetworkMode(fmt.Sprintf("container:%s", c.ID)),
+	}
+
+	resp, err := s.cli.ContainerCreate(ctx, cfg, hcfg, nil, "")
+	if err != nil {
+		return fmt.Errorf("couldn't create netem container: %v", err)
+	}
+
+	err = s.cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{})
+	if err != nil {
+		return fmt.Errorf("couldn't start netem container: %v", err)
+	}
+
+	rules := s.options.Topology.Rules(network.Node(c.Name[1:]), mapping)
+
+	ecfg := types.ExecConfig{
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+		Cmd:          []string{"./netem", "-log", "/dev/stdout"},
+	}
+	exec, err := s.cli.ContainerExecCreate(ctx, resp.ID, ecfg)
+	if err != nil {
+		return fmt.Errorf("couldn't create exec: %v", err)
+	}
+
+	conn, err := s.cli.ContainerExecAttach(ctx, exec.ID, types.ExecConfig{})
+	if err != nil {
+		return fmt.Errorf("couldn't attach to exec: %v", err)
+	}
+
+	defer conn.Close()
+
+	err = s.cli.ContainerExecStart(ctx, exec.ID, types.ExecStartCheck{})
+	if err != nil {
+		return fmt.Errorf("couldn't start exec: %v", err)
+	}
+
+	defer func() {
+		timeout := ContainerStopTimeout
+		e := s.cli.ContainerStop(ctx, resp.ID, &timeout)
+		if e != nil {
+			err = fmt.Errorf("couldn't stop the container: %v", err)
+		}
+	}()
+
+	enc := json.NewEncoder(conn.Conn)
+	err = enc.Encode(&rules)
+	if err != nil {
+		return fmt.Errorf("couldn't encode the rules: %v", err)
+	}
+
+	// Output from the monitor container executing the netem tool.
+	// io.Copy(ioutil.Discard, conn.Reader)
+
+	err = waitExec(exec.ID, msgCh, errCh)
+	if err != nil {
+		return fmt.Errorf("couldn't apply rule: %v", err)
+	}
+
+	return
+}
+
+func (s *Strategy) configureContainers(ctx context.Context) error {
+	reader, err := s.cli.ImagePull(ctx, "docker.io/dedis/simnet-monitor:latest", types.ImagePullOptions{})
+	if err != nil {
+		return fmt.Errorf("couldn't pull netem image: %v", err)
+	}
+
+	io.Copy(s.out, reader) // TODO: parse
+
+	cfg := &container.Config{
+		Image:      "dedis/simnet-monitor:latest",
+		Entrypoint: []string{"sh", "-c", "trap 'trap - TERM; kill -s TERM -- -$$' TERM; tail -f /dev/null && wait"},
+	}
+
+	// Create the mapping between node names and IPs.
+	mapping := make(map[network.Node]string)
+	for _, c := range s.containers {
+		mapping[network.Node(c.Name[1:])] = c.NetworkSettings.DefaultNetworkSettings.IPAddress
+	}
+
+	// Caller is responsible to cancel the context.
+	msgCh, errCh := s.cli.Events(ctx, types.EventsOptions{})
+
+	for i, c := range s.containers {
+		fmt.Fprintf(s.out, "Configuring container %d/%d\n", i+1, len(s.containers))
+
+		err = s.configureContainer(ctx, c, cfg, mapping, msgCh, errCh)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // Deploy pulls the application image and starts a container per node.
 func (s *Strategy) Deploy() error {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	err := s.pullImage(ctx)
 	if err != nil {
@@ -116,7 +252,10 @@ func (s *Strategy) Deploy() error {
 		return fmt.Errorf("couldn't create the container: %v", err)
 	}
 
-	time.Sleep(1 * time.Second)
+	err = s.configureContainers(ctx)
+	if err != nil {
+		return fmt.Errorf("couldn't configure the containers: %v", err)
+	}
 
 	fmt.Fprintln(s.out, "Deployment done.")
 
@@ -279,4 +418,8 @@ func (s *Strategy) Clean() error {
 	fmt.Fprintln(s.out, "Cleaning done.")
 
 	return nil
+}
+
+func (s *Strategy) String() string {
+	return "Docker"
 }
