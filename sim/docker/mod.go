@@ -99,11 +99,11 @@ func (s *Strategy) waitImagePull(reader io.Reader) error {
 		err := dec.Decode(&evt)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				fmt.Fprintln(s.out, goterm.ResetLine("Pull image done."))
+				fmt.Fprintln(s.out, goterm.ResetLine("Pull image... Done."))
 				return nil
 			}
 
-			fmt.Fprintln(s.out, goterm.ResetLine("Pull image error."))
+			fmt.Fprintln(s.out, goterm.ResetLine("Pull image... Failed."))
 			return fmt.Errorf("couldn't decode the event: %w", err)
 		}
 
@@ -112,7 +112,7 @@ func (s *Strategy) waitImagePull(reader io.Reader) error {
 			return fmt.Errorf("stream error: %s", evt.Error)
 		}
 
-		fmt.Fprintf(s.out, goterm.ResetLine("%s %s"), evt.Status, evt.Progress)
+		fmt.Fprintf(s.out, goterm.ResetLine("Pull image... %s %s"), evt.Status, evt.Progress)
 	}
 }
 
@@ -300,13 +300,16 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 	msgCh, errCh := s.cli.Events(ctx, types.EventsOptions{})
 
 	for i, c := range s.containers {
-		fmt.Fprintf(s.out, "Configuring container %d/%d\n", i+1, len(s.containers))
+		fmt.Fprintf(s.out, goterm.ResetLine("Configure containers... Progress [%d/%d]"), i+1, len(s.containers))
 
 		err = s.configureContainer(ctx, c, cfg, mapping, msgCh, errCh)
 		if err != nil {
+			fmt.Fprintln(s.out, goterm.ResetLine("Configure containers... Failed."))
 			return err
 		}
 	}
+
+	fmt.Fprintln(s.out, "")
 
 	return nil
 }
@@ -334,7 +337,7 @@ func (s *Strategy) Deploy() error {
 		return fmt.Errorf("couldn't configure the containers: %w", err)
 	}
 
-	fmt.Fprintln(s.out, "Deployment done.")
+	fmt.Fprintln(s.out, "Deployment... Done.")
 
 	return nil
 }
@@ -449,7 +452,7 @@ func (s *Strategy) Execute(round sim.Round) error {
 		return fmt.Errorf("couldn't execute: %w", err)
 	}
 
-	fmt.Fprintln(s.out, "Execution done.")
+	fmt.Fprintln(s.out, "Execution... Done.")
 
 	return nil
 }
@@ -469,7 +472,7 @@ func (s *Strategy) WriteStats(filename string) error {
 		return fmt.Errorf("couldn't encode the stats: %w", err)
 	}
 
-	fmt.Fprintln(s.out, "Statistics written.")
+	fmt.Fprintln(s.out, "Write statistics... Done.")
 
 	return nil
 }
@@ -492,7 +495,7 @@ func (s *Strategy) Clean() error {
 		return fmt.Errorf("couldn't remove the containers: %v", errs)
 	}
 
-	fmt.Fprintln(s.out, "Cleaning done.")
+	fmt.Fprintln(s.out, "Cleaning... Done.")
 
 	return nil
 }
