@@ -2,6 +2,7 @@
 
 [![Build Status](https://travis-ci.org/dedis/simnet.svg?branch=master)](https://travis-ci.org/dedis/simnet)
 [![Coverage Status](https://coveralls.io/repos/github/dedis/simnet/badge.svg?branch=master)](https://coveralls.io/github/dedis/simnet?branch=master)
+![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/dedis/simnet?label=version)
 
 Simnet is a tool to simulate a decentralized application using the cloud to
 host the simulation nodes. It provides multiple configurations to affect the
@@ -29,10 +30,12 @@ Dockerhub is configured to automatically create the following tags:
 
 ## Strategies
 
-The simulation uses strategies to manage the deployment and running of the rounds.
-A kubernetes strategy is provided and used by default.
+The environment the simulation is running depends on the chosen strategy. Two
+are currently available: Kubernetes and Docker.
 
-TODO: Docker strategy for local simulations ?
+It is completly interchangeable so that you can test your simulation locally with
+Docker and a small number of nodes. Then the simulation can be deployed on
+Kubernetes with a bigger amount of nodes.
 
 ### Kubernetes
 
@@ -43,6 +46,14 @@ alongside with a monitor container that will gather data for the statistics.
 One POD will also be used to deploy a router that will simply run OpenVPN so
 that the simulation can open a tunnel to the cluster network and thus make
 requests to the nodes.
+
+### Docker
+
+Simulations with the Docker strategy will interact with the local Docker setup
+to create one container per Node. Each of those containers will need another
+temporary container to configure the network emulation (latencies, etc...) but
+they will terminate before the simulation begins and they are booted one after
+the other.
 
 # How to
 
