@@ -14,6 +14,7 @@ import (
 	"go.dedis.ch/onet/v3/app"
 	"go.dedis.ch/onet/v3/network"
 	"go.dedis.ch/simnet"
+	"go.dedis.ch/simnet/sim"
 	"go.dedis.ch/simnet/sim/kubernetes"
 )
 
@@ -23,7 +24,7 @@ type StatusSimulationRound struct{}
 
 // Execute will contact each known node and ask for its status.
 func (r StatusSimulationRound) Execute(ctx context.Context) error {
-	files := ctx.Value(kubernetes.FilesKey("private.toml")).(kubernetes.Files)
+	files := ctx.Value(sim.FilesKey("private.toml")).(sim.Files)
 	idents := make([]*network.ServerIdentity, len(files))
 
 	for id, value := range files {
@@ -57,10 +58,10 @@ func (r StatusSimulationRound) Execute(ctx context.Context) error {
 func main() {
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
-	options := []kubernetes.Option{
-		kubernetes.WithFileMapper(
-			kubernetes.FilesKey("private.toml"),
-			kubernetes.FileMapper{
+	options := []sim.Option{
+		sim.WithFileMapper(
+			sim.FilesKey("private.toml"),
+			sim.FileMapper{
 				Path: "/root/.config/conode/private.toml",
 				Mapper: func(r io.Reader) (interface{}, error) {
 					hc := &app.CothorityConfig{}
@@ -78,12 +79,12 @@ func main() {
 				},
 			},
 		),
-		kubernetes.WithImage(
+		sim.WithImage(
 			"dedis/conode:latest",
 			[]string{"bash", "-c"},
 			[]string{"/root/conode setup --non-interactive --port 7770 && /root/conode -d 2 server"},
-			kubernetes.NewTCP(7770),
-			kubernetes.NewTCP(7771),
+			sim.NewTCP(7770),
+			sim.NewTCP(7771),
 		),
 	}
 
