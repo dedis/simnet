@@ -1,5 +1,7 @@
 #!/bin/sh
 
+NETDEV=${NETDEV:=eth0}
+
 set -o xtrace
 
 mkdir -p /dev/net
@@ -14,10 +16,12 @@ iptables -t nat -I POSTROUTING -o eth0 -s 10.0.0.0/24 -j MASQUERADE
 # To find what is the cluster network, as it can change from a provider
 # to another, the routes to eth0 are looked up.
 
-CIDR=$(ip route show | grep -v default | grep -m 1 via | awk '{print $1}')
+CIDR=$(ip route show dev $NETDEV | grep -v default | grep -m 1 via | awk '{print $1}')
 if [ -z "$CIDR" ]; then
-    echo "The default route to the cluster cannot be determined."
-    exit 1
+    # There is no via route other than the default so the route the client
+    # must follow is the LAN of the router running in the cluster.
+    
+    CIDR=$(ip route show dev $NETDEV | grep -v default | grep -m 1 link | awk '{print $1}')
 fi
 
 NETWORK=$(ipcalc -n $CIDR | cut -d "=" -f 2)
