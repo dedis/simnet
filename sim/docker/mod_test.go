@@ -45,6 +45,10 @@ func TestStrategy_Deploy(t *testing.T) {
 	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
+	client.bufferPullImage = new(bytes.Buffer)
+	enc := json.NewEncoder(client.bufferPullImage)
+	require.NoError(t, enc.Encode(&Event{Status: "Test"}))
+
 	err := s.Deploy()
 	require.NoError(t, err)
 
@@ -115,7 +119,7 @@ func TestStrategy_Deploy(t *testing.T) {
 
 	rules := []snet.Rule{{IP: "ip:node0", Delay: snet.Delay{Value: 50}}}
 	buffer := new(bytes.Buffer)
-	enc := json.NewEncoder(buffer)
+	enc = json.NewEncoder(buffer)
 	require.NoError(t, enc.Encode(&rules))
 
 	// Check that it attaches the I/O and write the rules.
@@ -143,13 +147,36 @@ func TestStrategy_Deploy(t *testing.T) {
 }
 
 func TestStrategy_PullImageFailures(t *testing.T) {
-	e := errors.New("pull image error")
-	s, clean := newTestStrategyWithClient(t, &testClient{numContainers: 3, errImagePull: e})
+	client := &testClient{numContainers: 3}
+	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
+
+	e := errors.New("pull image error")
+	client.errImagePull = e
 
 	err := s.Deploy()
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
+
+	// Stream error happening during a pull.
+	client.resetErrors()
+	client.bufferPullImage = new(bytes.Buffer)
+
+	enc := json.NewEncoder(client.bufferPullImage)
+	strerr := "stream error"
+	require.NoError(t, enc.Encode(&Event{Error: strerr}))
+
+	err = s.pullImage(context.Background())
+	require.Error(t, err)
+	require.EqualError(t, errors.Unwrap(err), fmt.Sprintf("stream error: %s", strerr))
+
+	// Data received is corrupted.
+	client.bufferPullImage.Reset()
+	client.bufferPullImage.Write([]byte("invalid event"))
+
+	err = s.pullImage(context.Background())
+	require.Error(t, err)
+	require.EqualError(t, errors.Unwrap(errors.Unwrap(err)), "invalid character 'i' looking for beginning of value")
 }
 
 func TestStrategy_CreateContainerFailures(t *testing.T) {
@@ -194,6 +221,13 @@ func TestStrategy_ConfigureContainersFailures(t *testing.T) {
 	err := s.configureContainers(context.Background())
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
+
+	client.resetErrors()
+	client.bufferPullImage = bytes.NewBuffer([]byte("invalid event"))
+
+	err = s.configureContainers(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid character")
 
 	e = errors.New("create netem container error")
 	client.resetErrors()
@@ -531,6 +565,8 @@ type testClient struct {
 	callsExecAttach       []testCallExecAttach
 	callsExecStart        []testCallExecStart
 
+	bufferPullImage *bytes.Buffer
+
 	// Don't forget to update the reset function when adding new errors.
 	errImagePull           error
 	errContainerCreate     error
@@ -549,6 +585,7 @@ type testClient struct {
 }
 
 func (c *testClient) resetErrors() {
+	c.bufferPullImage = nil
 	c.errImagePull = nil
 	c.errContainerCreate = nil
 	c.errContainerStart = nil
@@ -567,9 +604,11 @@ func (c *testClient) resetErrors() {
 func (c *testClient) ImagePull(ctx context.Context, ref string, opts types.ImagePullOptions) (io.ReadCloser, error) {
 	c.callsImagePull = append(c.callsImagePull, testCallPullImage{ctx, ref, opts})
 
-	reader, _ := io.Pipe()
-	reader.Close()
-	return reader, c.errImagePull
+	if c.bufferPullImage != nil {
+		return ioutil.NopCloser(c.bufferPullImage), c.errImagePull
+	}
+
+	return ioutil.NopCloser(new(bytes.Buffer)), c.errImagePull
 }
 
 func (c *testClient) ContainerCreate(ctx context.Context, cfg *container.Config, hcfg *container.HostConfig, ncfg *network.NetworkingConfig, name string) (container.ContainerCreateCreatedBody, error) {

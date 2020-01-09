@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/buger/goterm"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
@@ -40,6 +41,13 @@ const (
 var (
 	monitorNetEmulatorCommand = []string{"./netem", "-log", "/dev/stdout"}
 )
+
+// Event is the json encoded events sent when pulling an image.
+type Event struct {
+	Status   string `json:"status"`
+	Error    string `json:"error"`
+	Progress string `json:"progress"`
+}
 
 // Encoder is the function used to encode the statistics in a given format.
 type Encoder func(io.Writer, *metrics.Stats) error
@@ -84,15 +92,44 @@ func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 	}, nil
 }
 
+func (s *Strategy) waitImagePull(reader io.Reader) error {
+	dec := json.NewDecoder(reader)
+	evt := Event{}
+	for {
+		err := dec.Decode(&evt)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				fmt.Fprintln(s.out, goterm.ResetLine("Pull image done."))
+				return nil
+			}
+
+			fmt.Fprintln(s.out, goterm.ResetLine("Pull image error."))
+			return fmt.Errorf("couldn't decode the event: %w", err)
+		}
+
+		if evt.Error != "" {
+			// Typically a stream errors or a server side error.
+			return fmt.Errorf("stream error: %s", evt.Error)
+		}
+
+		fmt.Fprintf(s.out, goterm.ResetLine("%s %s"), evt.Status, evt.Progress)
+	}
+}
+
 func (s *Strategy) pullImage(ctx context.Context) error {
-	ref := fmt.Sprintf("docker.io/%s", s.options.Image)
+	ref := fmt.Sprintf("%s/%s", ImageBaseURL, s.options.Image)
 
 	reader, err := s.cli.ImagePull(ctx, ref, types.ImagePullOptions{})
 	if err != nil {
 		return err
 	}
 
-	io.Copy(s.out, reader) // TODO: parse status
+	defer reader.Close()
+
+	err = s.waitImagePull(reader)
+	if err != nil {
+		return fmt.Errorf("couldn't complete pull: %w", err)
+	}
 
 	return nil
 }
@@ -239,7 +276,12 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 		return fmt.Errorf("couldn't pull netem image: %w", err)
 	}
 
-	io.Copy(s.out, reader) // TODO: parse
+	defer reader.Close()
+
+	err = s.waitImagePull(reader)
+	if err != nil {
+		return fmt.Errorf("couldn't complete pull: %w", err)
+	}
 
 	cfg := &container.Config{
 		Image: ImageMonitor,
@@ -279,10 +321,13 @@ func (s *Strategy) Deploy() error {
 		return fmt.Errorf("couldn't pull the image: %w", err)
 	}
 
+	fmt.Fprintf(s.out, "Creating containers... In Progress.")
 	err = s.createContainers(ctx)
 	if err != nil {
+		fmt.Fprintln(s.out, goterm.ResetLine("Creating containers... Failed."))
 		return fmt.Errorf("couldn't create the container: %w", err)
 	}
+	fmt.Fprintln(s.out, goterm.ResetLine("Creating containers... Done."))
 
 	err = s.configureContainers(ctx)
 	if err != nil {
