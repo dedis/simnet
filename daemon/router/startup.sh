@@ -19,9 +19,9 @@ iptables -t nat -I POSTROUTING -o eth0 -s 10.0.0.0/24 -j MASQUERADE
 CIDR=$(ip route show dev $NETDEV | grep -v default | grep -m 1 via | awk '{print $1}')
 if [ -z "$CIDR" ]; then
     # There is no via route other than the default so the route the client
-    # must follow is the LAN of the router running in the cluster.
+    # must follow is the private LAN of the router running in the cluster.
     
-    CIDR=$(ip route show dev $NETDEV | grep -v default | grep -m 1 link | awk '{print $1}')
+    CIDR=10.0.0.0/8
 fi
 
 NETWORK=$(ipcalc -n $CIDR | cut -d "=" -f 2)
