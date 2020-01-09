@@ -107,42 +107,19 @@ func TestStrategy_Deploy(t *testing.T) {
 	// Check that the events are listened.
 	require.Len(t, client.callsEvents, 1)
 
-	// Check that exec request are created.
-	require.Len(t, client.callsExecCreate, n)
-	for _, call := range client.callsExecCreate {
-		require.Equal(t, "id:", call.id)
-		require.True(t, call.options.AttachStdin)
-		require.True(t, call.options.AttachStderr)
-		require.True(t, call.options.AttachStdout)
-		require.Equal(t, monitorNetEmulatorCommand, call.options.Cmd)
-	}
-
 	rules := []snet.Rule{{IP: "ip:node0", Delay: snet.Delay{Value: 50}}}
 	buffer := new(bytes.Buffer)
 	enc = json.NewEncoder(buffer)
 	require.NoError(t, enc.Encode(&rules))
 
 	// Check that it attaches the I/O and write the rules.
-	require.Len(t, client.callsExecAttach, n)
-	for i, call := range client.callsExecAttach {
-		require.Equal(t, testExecID, call.id)
+	require.Len(t, client.callsContainerAttach, n)
+	for i, call := range client.callsContainerAttach {
+		require.Equal(t, "id:", call.id)
 
 		if i != 0 {
 			require.Equal(t, buffer.String(), call.buffer.String())
 		}
-	}
-
-	// Check that it starts the execs.
-	require.Len(t, client.callsExecStart, n)
-	for _, call := range client.callsExecStart {
-		require.Equal(t, testExecID, call.id)
-	}
-
-	// Check that the monitor containers are stopped.
-	require.Len(t, client.callsContainerStop, n)
-	for _, call := range client.callsContainerStop {
-		require.Equal(t, "id:", call.id)
-		require.Equal(t, ContainerStopTimeout, *call.t)
 	}
 }
 
@@ -237,41 +214,17 @@ func TestStrategy_ConfigureContainersFailures(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
+	e = errors.New("attach netem container error")
+	client.resetErrors()
+	client.errContainerAttach = e
+
+	err = s.configureContainers(context.Background())
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
+
 	e = errors.New("start netem container error")
 	client.resetErrors()
 	client.errContainerStart = e
-
-	err = s.configureContainers(context.Background())
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
-
-	e = errors.New("create exec error")
-	client.resetErrors()
-	client.errContainerExecCreate = e
-
-	err = s.configureContainers(context.Background())
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
-
-	e = errors.New("attach exec error")
-	client.resetErrors()
-	client.errContainerExecAttach = e
-
-	err = s.configureContainers(context.Background())
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
-
-	e = errors.New("start exec error")
-	client.resetErrors()
-	client.errContainerExecStart = e
-
-	err = s.configureContainers(context.Background())
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
-
-	e = errors.New("stop netem container error")
-	client.resetErrors()
-	client.errContainerStop = e
 
 	err = s.configureContainers(context.Background())
 	require.Error(t, err)
@@ -300,18 +253,18 @@ func TestStrategy_WaitExecFailures(t *testing.T) {
 	require.EqualError(t, err, "timeout")
 
 	ch := make(chan events.Message, 1)
-	execID := "123"
+	id := "123"
 	ch <- events.Message{
-		Status: "exec_die",
+		Status: "die",
 		Actor: events.Actor{
+			ID: id,
 			Attributes: map[string]string{
-				"execID":   execID,
 				"exitCode": "1",
 			},
 		},
 	}
 
-	err = waitExec(execID, ch, nil, time.Second)
+	err = waitExec(id, ch, nil, time.Second)
 	require.Error(t, err)
 	require.EqualError(t, err, "exit code 1")
 }
@@ -510,6 +463,13 @@ type testCallContainerCreate struct {
 	name string
 }
 
+type testCallContainerAttach struct {
+	ctx     context.Context
+	id      string
+	options types.ContainerAttachOptions
+	buffer  *bytes.Buffer
+}
+
 type testCallContainerStart struct {
 	ctx     context.Context
 	id      string
@@ -532,54 +492,31 @@ type testCallEvents struct {
 	options types.EventsOptions
 }
 
-type testCallExecCreate struct {
-	ctx     context.Context
-	id      string
-	options types.ExecConfig
-}
-
-type testCallExecAttach struct {
-	ctx     context.Context
-	id      string
-	options types.ExecConfig
-	buffer  *bytes.Buffer
-}
-
-type testCallExecStart struct {
-	ctx     context.Context
-	id      string
-	options types.ExecStartCheck
-}
-
 type testClient struct {
 	*client.Client
 	numContainers int
 
 	callsImagePull        []testCallPullImage
 	callsContainerCreate  []testCallContainerCreate
+	callsContainerAttach  []testCallContainerAttach
 	callsContainerStart   []testCallContainerStart
 	callsContainerInspect []testCallContainerInspect
 	callsContainerStop    []testCallContainerStop
 	callsEvents           []testCallEvents
-	callsExecCreate       []testCallExecCreate
-	callsExecAttach       []testCallExecAttach
-	callsExecStart        []testCallExecStart
 
 	bufferPullImage *bytes.Buffer
 
 	// Don't forget to update the reset function when adding new errors.
-	errImagePull           error
-	errContainerCreate     error
-	errContainerStart      error
-	errContainerInspect    error
-	errContainerStop       error
-	errContainerStats      error
-	errContainerExecCreate error
-	errContainerExecAttach error
-	errContainerExecStart  error
-	errCopyFromContainer   error
-	errAttachConn          error
-	errEvent               error
+	errImagePull         error
+	errContainerCreate   error
+	errContainerAttach   error
+	errContainerStart    error
+	errContainerInspect  error
+	errContainerStop     error
+	errContainerStats    error
+	errCopyFromContainer error
+	errAttachConn        error
+	errEvent             error
 
 	errCopyReader bool
 }
@@ -588,13 +525,11 @@ func (c *testClient) resetErrors() {
 	c.bufferPullImage = nil
 	c.errImagePull = nil
 	c.errContainerCreate = nil
+	c.errContainerAttach = nil
 	c.errContainerStart = nil
 	c.errContainerInspect = nil
 	c.errContainerStop = nil
 	c.errContainerStats = nil
-	c.errContainerExecCreate = nil
-	c.errContainerExecAttach = nil
-	c.errContainerExecStart = nil
 	c.errCopyFromContainer = nil
 	c.errAttachConn = nil
 	c.errEvent = nil
@@ -615,6 +550,18 @@ func (c *testClient) ContainerCreate(ctx context.Context, cfg *container.Config,
 	c.callsContainerCreate = append(c.callsContainerCreate, testCallContainerCreate{ctx, cfg, hcfg, ncfg, name})
 
 	return container.ContainerCreateCreatedBody{ID: fmt.Sprintf("id:%s", name)}, c.errContainerCreate
+}
+
+func (c *testClient) ContainerAttach(ctx context.Context, id string, options types.ContainerAttachOptions) (types.HijackedResponse, error) {
+	buffer := new(bytes.Buffer)
+	c.callsContainerAttach = append(c.callsContainerAttach, testCallContainerAttach{ctx, id, options, buffer})
+
+	conn := &testConn{
+		buffer: buffer,
+		err:    c.errAttachConn,
+	}
+
+	return types.HijackedResponse{Conn: conn}, c.errContainerAttach
 }
 
 func (c *testClient) ContainerStart(ctx context.Context, id string, options types.ContainerStartOptions) error {
@@ -660,30 +607,6 @@ func (c *testClient) ContainerStats(context.Context, string, bool) (types.Contai
 	return types.ContainerStats{Body: ioutil.NopCloser(buffer)}, c.errContainerStats
 }
 
-func (c *testClient) ContainerExecCreate(ctx context.Context, id string, options types.ExecConfig) (types.IDResponse, error) {
-	c.callsExecCreate = append(c.callsExecCreate, testCallExecCreate{ctx, id, options})
-
-	return types.IDResponse{ID: testExecID}, c.errContainerExecCreate
-}
-
-func (c *testClient) ContainerExecAttach(ctx context.Context, id string, options types.ExecConfig) (types.HijackedResponse, error) {
-	buffer := new(bytes.Buffer)
-	c.callsExecAttach = append(c.callsExecAttach, testCallExecAttach{ctx, id, options, buffer})
-
-	conn := &testConn{
-		buffer: buffer,
-		err:    c.errAttachConn,
-	}
-
-	return types.HijackedResponse{Conn: conn}, c.errContainerExecAttach
-}
-
-func (c *testClient) ContainerExecStart(ctx context.Context, id string, options types.ExecStartCheck) error {
-	c.callsExecStart = append(c.callsExecStart, testCallExecStart{ctx, id, options})
-
-	return c.errContainerExecStart
-}
-
 func (c *testClient) ContainerStop(ctx context.Context, id string, t *time.Duration) error {
 	c.callsContainerStop = append(c.callsContainerStop, testCallContainerStop{ctx, id, t})
 
@@ -722,10 +645,10 @@ func (c *testClient) Events(ctx context.Context, options types.EventsOptions) (<
 	ch := make(chan events.Message, c.numContainers)
 	for i := 0; i < c.numContainers; i++ {
 		ch <- events.Message{
-			Status: "exec_die",
+			Status: "die",
 			Actor: events.Actor{
+				ID: "id:",
 				Attributes: map[string]string{
-					"execID":   testExecID,
 					"exitCode": "0",
 				},
 			},
@@ -736,8 +659,7 @@ func (c *testClient) Events(ctx context.Context, options types.EventsOptions) (<
 }
 
 const (
-	testImage  = "path/to/image"
-	testExecID = "feeddaed"
+	testImage = "path/to/image"
 )
 
 var (

@@ -173,13 +173,13 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 	return nil
 }
 
-func waitExec(execID string, msgCh <-chan events.Message, errCh <-chan error, t time.Duration) error {
+func waitExec(containerID string, msgCh <-chan events.Message, errCh <-chan error, t time.Duration) error {
 	timeout := time.After(t)
 
 	for {
 		select {
 		case msg := <-msgCh:
-			if msg.Status == "exec_die" && msg.Actor.Attributes["execID"] == execID {
+			if msg.Status == "die" && msg.Actor.ID == containerID {
 				code := msg.Actor.Attributes["exitCode"]
 				if code != "0" {
 					return fmt.Errorf("exit code %s", code)
@@ -202,7 +202,7 @@ func (s *Strategy) configureContainer(
 	mapping map[network.Node]string,
 	msgCh <-chan events.Message,
 	errCh <-chan error,
-) (err error) {
+) error {
 	hcfg := &container.HostConfig{
 		AutoRemove:  true,
 		CapAdd:      []string{"NET_ADMIN"},
@@ -214,44 +214,24 @@ func (s *Strategy) configureContainer(
 		return fmt.Errorf("couldn't create netem container: %w", err)
 	}
 
+	conn, err := s.cli.ContainerAttach(ctx, resp.ID, types.ContainerAttachOptions{
+		Stream: true,
+		Stdin:  true,
+		Stdout: true,
+		Stderr: true,
+	})
+	if err != nil {
+		return err
+	}
+
+	defer conn.Close()
+
 	err = s.cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{})
 	if err != nil {
 		return fmt.Errorf("couldn't start netem container: %w", err)
 	}
 
 	rules := s.options.Topology.Rules(network.Node(c.Name[1:]), mapping)
-
-	ecfg := types.ExecConfig{
-		AttachStdin:  true,
-		AttachStdout: true,
-		AttachStderr: true,
-		// Logs are by default disabled to /dev/null
-		Cmd: monitorNetEmulatorCommand,
-	}
-	exec, err := s.cli.ContainerExecCreate(ctx, resp.ID, ecfg)
-	if err != nil {
-		return fmt.Errorf("couldn't create exec: %w", err)
-	}
-
-	conn, err := s.cli.ContainerExecAttach(ctx, exec.ID, types.ExecConfig{})
-	if err != nil {
-		return fmt.Errorf("couldn't attach to exec: %w", err)
-	}
-
-	defer conn.Close()
-
-	err = s.cli.ContainerExecStart(ctx, exec.ID, types.ExecStartCheck{})
-	if err != nil {
-		return fmt.Errorf("couldn't start exec: %w", err)
-	}
-
-	defer func() {
-		timeout := ContainerStopTimeout
-		e := s.cli.ContainerStop(ctx, resp.ID, &timeout)
-		if e != nil {
-			err = fmt.Errorf("couldn't stop the container: %w", e)
-		}
-	}()
 
 	enc := json.NewEncoder(conn.Conn)
 	err = enc.Encode(&rules)
@@ -262,12 +242,12 @@ func (s *Strategy) configureContainer(
 	// Output from the monitor container executing the netem tool.
 	// io.Copy(ioutil.Discard, conn.Reader)
 
-	err = waitExec(exec.ID, msgCh, errCh, ExecWaitTimeout)
+	err = waitExec(resp.ID, msgCh, errCh, ExecWaitTimeout)
 	if err != nil {
 		return fmt.Errorf("couldn't apply rule: %w", err)
 	}
 
-	return
+	return nil
 }
 
 func (s *Strategy) configureContainers(ctx context.Context) error {
@@ -284,10 +264,13 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 	}
 
 	cfg := &container.Config{
-		Image: ImageMonitor,
-		// The container must remain alive so that commands can be executed.
-		// TODO: investigate without exec.
-		Entrypoint: []string{"sh", "-c", "trap 'trap - TERM; kill -s TERM -- -$$' TERM; tail -f /dev/null && wait"},
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+		OpenStdin:    true,
+		StdinOnce:    true,
+		Image:        ImageMonitor,
+		Entrypoint:   monitorNetEmulatorCommand,
 	}
 
 	// Create the mapping between node names and IPs.
