@@ -29,6 +29,16 @@ const (
 
 	// ExecWaitTimeout is the maximum amount of time given to an exec to end.
 	ExecWaitTimeout = 10 * time.Second
+
+	// ImageBaseURL is the origin where the images will be pulled.
+	ImageBaseURL = "docker.io"
+	// ImageMonitor is the path to the docker image that contains the network
+	// emulator tool.
+	ImageMonitor = "dedis/simnet-monitor:latest"
+)
+
+var (
+	monitorNetEmulatorCommand = []string{"./netem", "-log", "/dev/stdout"}
 )
 
 // Encoder is the function used to encode the statistics in a given format.
@@ -87,7 +97,7 @@ func (s *Strategy) pullImage(ctx context.Context) error {
 	return nil
 }
 
-func (s *Strategy) createContainer(ctx context.Context) error {
+func (s *Strategy) createContainers(ctx context.Context) error {
 	ports := nat.PortSet{}
 	for _, port := range s.options.Ports {
 		// TODO: handle protocol
@@ -178,7 +188,8 @@ func (s *Strategy) configureContainer(
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
-		Cmd:          []string{"./netem", "-log", "/dev/stdout"},
+		// Logs are by default disabled to /dev/null
+		Cmd: monitorNetEmulatorCommand,
 	}
 	exec, err := s.cli.ContainerExecCreate(ctx, resp.ID, ecfg)
 	if err != nil {
@@ -231,7 +242,9 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 	io.Copy(s.out, reader) // TODO: parse
 
 	cfg := &container.Config{
-		Image:      "dedis/simnet-monitor:latest",
+		Image: ImageMonitor,
+		// The container must remain alive so that commands can be executed.
+		// TODO: investigate without exec.
 		Entrypoint: []string{"sh", "-c", "trap 'trap - TERM; kill -s TERM -- -$$' TERM; tail -f /dev/null && wait"},
 	}
 
@@ -266,7 +279,7 @@ func (s *Strategy) Deploy() error {
 		return fmt.Errorf("couldn't pull the image: %w", err)
 	}
 
-	err = s.createContainer(ctx)
+	err = s.createContainers(ctx)
 	if err != nil {
 		return fmt.Errorf("couldn't create the container: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -38,11 +39,98 @@ func TestStrategy_New(t *testing.T) {
 }
 
 func TestStrategy_Deploy(t *testing.T) {
-	s, clean := newTestStrategy(t)
+	n := 3
+	client := &testClient{numContainers: n}
+	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
 	err := s.Deploy()
 	require.NoError(t, err)
+
+	// Check that application and monitor images are pulled.
+	require.Len(t, client.callsImagePull, 2)
+	require.Equal(t, fmt.Sprintf("%s/%s", ImageBaseURL, testImage), client.callsImagePull[0].ref)
+	require.Equal(t, fmt.Sprintf("%s/%s", ImageBaseURL, ImageMonitor), client.callsImagePull[1].ref)
+
+	// Check that the correct list of containers is created.
+	// - n for the application
+	// - n for the netem container
+	require.Len(t, client.callsContainerCreate, n*2)
+
+	for _, call := range client.callsContainerCreate {
+		require.True(t, call.hcfg.AutoRemove)
+	}
+
+	for _, call := range client.callsContainerCreate[:n] {
+		require.Equal(t, testImage, call.cfg.Image)
+		require.EqualValues(t, call.cfg.Cmd[:len(testCmd)], testCmd)
+		require.EqualValues(t, call.cfg.Cmd[len(testCmd):], testArgs)
+		require.Equal(t, "map[2000:{} 2001:{}]", fmt.Sprintf("%v", call.cfg.ExposedPorts))
+	}
+
+	for i, call := range client.callsContainerCreate[n:] {
+		require.Equal(t, ImageMonitor, call.cfg.Image)
+		require.EqualValues(t, []string{"NET_ADMIN"}, call.hcfg.CapAdd)
+		require.Equal(t, container.NetworkMode(fmt.Sprintf("container:%s", s.containers[i].ID)), call.hcfg.NetworkMode)
+	}
+
+	// Check that the containers are correctly started.
+	require.Len(t, client.callsContainerStart, n*2)
+	for i, call := range client.callsContainerStart[:n] {
+		require.Equal(t, s.containers[i].ID, call.id)
+	}
+	for _, call := range client.callsContainerStart[n:] {
+		// Name is empty for monitor containers.
+		require.Equal(t, "id:", call.id)
+	}
+
+	// Check that the containers are correctly fetched.
+	require.Len(t, client.callsContainerInspect, n)
+	require.Len(t, s.containers, n)
+	for i, call := range client.callsContainerInspect {
+		require.Equal(t, s.containers[i].ID, call.id)
+	}
+
+	// Check that the events are listened.
+	require.Len(t, client.callsEvents, 1)
+
+	// Check that exec request are created.
+	require.Len(t, client.callsExecCreate, n)
+	for _, call := range client.callsExecCreate {
+		require.Equal(t, "id:", call.id)
+		require.True(t, call.options.AttachStdin)
+		require.True(t, call.options.AttachStderr)
+		require.True(t, call.options.AttachStdout)
+		require.Equal(t, monitorNetEmulatorCommand, call.options.Cmd)
+	}
+
+	rules := []snet.Rule{{IP: "ip:node0", Delay: snet.Delay{Value: 50}}}
+	buffer := new(bytes.Buffer)
+	enc := json.NewEncoder(buffer)
+	require.NoError(t, enc.Encode(&rules))
+
+	// Check that it attaches the I/O and write the rules.
+	require.Len(t, client.callsExecAttach, n)
+	for i, call := range client.callsExecAttach {
+		require.Equal(t, testExecID, call.id)
+
+		if i != 0 {
+			require.Equal(t, buffer.String(), call.buffer.String())
+		}
+	}
+
+	// Check that it starts the execs.
+	require.Len(t, client.callsExecStart, n)
+	for _, call := range client.callsExecStart {
+		require.Equal(t, testExecID, call.id)
+	}
+
+	// Check that the monitor containers are stopped.
+	require.Len(t, client.callsContainerStop, n)
+	for _, call := range client.callsContainerStop {
+		require.Equal(t, "id:", call.id)
+		require.Equal(t, ContainerStopTimeout, *call.t)
+	}
 }
 
 func TestStrategy_PullImageFailures(t *testing.T) {
@@ -89,7 +177,7 @@ func TestStrategy_ConfigureContainersFailures(t *testing.T) {
 	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer()}
+	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
 
 	e := errors.New("pull netem image error")
 	client.errImagePull = e
@@ -197,7 +285,7 @@ func TestStrategy_Execute(t *testing.T) {
 	s, clean := newTestStrategy(t)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer()}
+	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
 
 	err := s.Execute(testRound{})
 	require.NoError(t, err)
@@ -219,7 +307,7 @@ func TestStrategy_MakeContextFailures(t *testing.T) {
 	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer()}
+	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
 
 	e := errors.New("copy file error")
 	client.errCopyFromContainer = e
@@ -254,7 +342,7 @@ func TestStrategy_MonitorContainerFailures(t *testing.T) {
 	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer()}
+	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
 
 	e := errors.New("monitor container error")
 	client.errContainerStats = e
@@ -296,7 +384,7 @@ func TestStrategy_Clean(t *testing.T) {
 	s, clean := newTestStrategy(t)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer()}
+	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
 
 	err := s.Clean()
 	require.NoError(t, err)
@@ -307,7 +395,7 @@ func TestStrategy_CleanFailures(t *testing.T) {
 	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer()}
+	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
 
 	e := errors.New("container stop error")
 	client.errContainerStop = e
@@ -365,9 +453,74 @@ func (c *testConn) SetWriteDeadline(time.Time) error {
 	return nil
 }
 
+type testCallPullImage struct {
+	ctx     context.Context
+	ref     string
+	options types.ImagePullOptions
+}
+
+type testCallContainerCreate struct {
+	ctx  context.Context
+	cfg  *container.Config
+	hcfg *container.HostConfig
+	ncfg *network.NetworkingConfig
+	name string
+}
+
+type testCallContainerStart struct {
+	ctx     context.Context
+	id      string
+	options types.ContainerStartOptions
+}
+
+type testCallContainerInspect struct {
+	ctx context.Context
+	id  string
+}
+
+type testCallContainerStop struct {
+	ctx context.Context
+	id  string
+	t   *time.Duration
+}
+
+type testCallEvents struct {
+	ctx     context.Context
+	options types.EventsOptions
+}
+
+type testCallExecCreate struct {
+	ctx     context.Context
+	id      string
+	options types.ExecConfig
+}
+
+type testCallExecAttach struct {
+	ctx     context.Context
+	id      string
+	options types.ExecConfig
+	buffer  *bytes.Buffer
+}
+
+type testCallExecStart struct {
+	ctx     context.Context
+	id      string
+	options types.ExecStartCheck
+}
+
 type testClient struct {
 	*client.Client
 	numContainers int
+
+	callsImagePull        []testCallPullImage
+	callsContainerCreate  []testCallContainerCreate
+	callsContainerStart   []testCallContainerStart
+	callsContainerInspect []testCallContainerInspect
+	callsContainerStop    []testCallContainerStop
+	callsEvents           []testCallEvents
+	callsExecCreate       []testCallExecCreate
+	callsExecAttach       []testCallExecAttach
+	callsExecStart        []testCallExecStart
 
 	// Don't forget to update the reset function when adding new errors.
 	errImagePull           error
@@ -402,33 +555,44 @@ func (c *testClient) resetErrors() {
 	c.errCopyReader = false
 }
 
-func (c *testClient) ImagePull(context.Context, string, types.ImagePullOptions) (io.ReadCloser, error) {
+func (c *testClient) ImagePull(ctx context.Context, ref string, opts types.ImagePullOptions) (io.ReadCloser, error) {
+	c.callsImagePull = append(c.callsImagePull, testCallPullImage{ctx, ref, opts})
+
 	reader, _ := io.Pipe()
 	reader.Close()
 	return reader, c.errImagePull
 }
 
-func (c *testClient) ContainerCreate(context.Context, *container.Config, *container.HostConfig, *network.NetworkingConfig, string) (container.ContainerCreateCreatedBody, error) {
-	return container.ContainerCreateCreatedBody{}, c.errContainerCreate
+func (c *testClient) ContainerCreate(ctx context.Context, cfg *container.Config, hcfg *container.HostConfig, ncfg *network.NetworkingConfig, name string) (container.ContainerCreateCreatedBody, error) {
+	c.callsContainerCreate = append(c.callsContainerCreate, testCallContainerCreate{ctx, cfg, hcfg, ncfg, name})
+
+	return container.ContainerCreateCreatedBody{ID: fmt.Sprintf("id:%s", name)}, c.errContainerCreate
 }
 
-func (c *testClient) ContainerStart(context.Context, string, types.ContainerStartOptions) error {
+func (c *testClient) ContainerStart(ctx context.Context, id string, options types.ContainerStartOptions) error {
+	c.callsContainerStart = append(c.callsContainerStart, testCallContainerStart{ctx, id, options})
+
 	return c.errContainerStart
 }
 
-func makeTestContainer() types.ContainerJSON {
+func makeTestContainer(id string) types.ContainerJSON {
 	return types.ContainerJSON{
-		ContainerJSONBase: &types.ContainerJSONBase{Name: "/node0"},
+		ContainerJSONBase: &types.ContainerJSONBase{
+			Name: fmt.Sprintf("/%s", id[3:]),
+			ID:   id,
+		},
 		NetworkSettings: &types.NetworkSettings{
 			DefaultNetworkSettings: types.DefaultNetworkSettings{
-				IPAddress: "1.2.3.4",
+				IPAddress: fmt.Sprintf("ip:%s", id[3:]),
 			},
 		},
 	}
 }
 
-func (c *testClient) ContainerInspect(context.Context, string) (types.ContainerJSON, error) {
-	return makeTestContainer(), c.errContainerInspect
+func (c *testClient) ContainerInspect(ctx context.Context, id string) (types.ContainerJSON, error) {
+	c.callsContainerInspect = append(c.callsContainerInspect, testCallContainerInspect{ctx, id})
+
+	return makeTestContainer(id), c.errContainerInspect
 }
 
 func (c *testClient) ContainerStats(context.Context, string, bool) (types.ContainerStats, error) {
@@ -448,24 +612,33 @@ func (c *testClient) ContainerStats(context.Context, string, bool) (types.Contai
 	return types.ContainerStats{Body: ioutil.NopCloser(buffer)}, c.errContainerStats
 }
 
-func (c *testClient) ContainerExecCreate(context.Context, string, types.ExecConfig) (types.IDResponse, error) {
-	return types.IDResponse{ID: "123"}, c.errContainerExecCreate
+func (c *testClient) ContainerExecCreate(ctx context.Context, id string, options types.ExecConfig) (types.IDResponse, error) {
+	c.callsExecCreate = append(c.callsExecCreate, testCallExecCreate{ctx, id, options})
+
+	return types.IDResponse{ID: testExecID}, c.errContainerExecCreate
 }
 
-func (c *testClient) ContainerExecAttach(context.Context, string, types.ExecConfig) (types.HijackedResponse, error) {
+func (c *testClient) ContainerExecAttach(ctx context.Context, id string, options types.ExecConfig) (types.HijackedResponse, error) {
+	buffer := new(bytes.Buffer)
+	c.callsExecAttach = append(c.callsExecAttach, testCallExecAttach{ctx, id, options, buffer})
+
 	conn := &testConn{
-		buffer: new(bytes.Buffer),
+		buffer: buffer,
 		err:    c.errAttachConn,
 	}
 
 	return types.HijackedResponse{Conn: conn}, c.errContainerExecAttach
 }
 
-func (c *testClient) ContainerExecStart(context.Context, string, types.ExecStartCheck) error {
+func (c *testClient) ContainerExecStart(ctx context.Context, id string, options types.ExecStartCheck) error {
+	c.callsExecStart = append(c.callsExecStart, testCallExecStart{ctx, id, options})
+
 	return c.errContainerExecStart
 }
 
-func (c *testClient) ContainerStop(context.Context, string, *time.Duration) error {
+func (c *testClient) ContainerStop(ctx context.Context, id string, t *time.Duration) error {
+	c.callsContainerStop = append(c.callsContainerStop, testCallContainerStop{ctx, id, t})
+
 	return c.errContainerStop
 }
 
@@ -489,7 +662,9 @@ func (c *testClient) CopyFromContainer(context.Context, string, string) (io.Read
 	return reader, types.ContainerPathStat{}, c.errCopyFromContainer
 }
 
-func (c *testClient) Events(context.Context, types.EventsOptions) (<-chan events.Message, <-chan error) {
+func (c *testClient) Events(ctx context.Context, options types.EventsOptions) (<-chan events.Message, <-chan error) {
+	c.callsEvents = append(c.callsEvents, testCallEvents{ctx, options})
+
 	if c.errEvent != nil {
 		ch := make(chan error, 1)
 		ch <- c.errEvent
@@ -502,7 +677,7 @@ func (c *testClient) Events(context.Context, types.EventsOptions) (<-chan events
 			Status: "exec_die",
 			Actor: events.Actor{
 				Attributes: map[string]string{
-					"execID":   "123",
+					"execID":   testExecID,
 					"exitCode": "0",
 				},
 			},
@@ -511,6 +686,16 @@ func (c *testClient) Events(context.Context, types.EventsOptions) (<-chan events
 
 	return ch, nil
 }
+
+const (
+	testImage  = "path/to/image"
+	testExecID = "feeddaed"
+)
+
+var (
+	testCmd  = []string{"cmd"}
+	testArgs = []string{"arg1"}
+)
 
 func newTestStrategy(t *testing.T) (*Strategy, func()) {
 	out, err := ioutil.TempDir(os.TempDir(), "simnet-docker-test")
@@ -525,11 +710,11 @@ func newTestStrategy(t *testing.T) (*Strategy, func()) {
 		out: ioutil.Discard,
 		options: sim.NewOptions([]sim.Option{
 			sim.WithOutput(out),
-			sim.WithTopology(snet.NewSimpleTopology(3, 0)),
+			sim.WithTopology(snet.NewSimpleTopology(3, 50)),
 			sim.WithImage(
-				"path/to/image",
-				[]string{"cmd"},
-				[]string{"arg1"},
+				testImage,
+				testCmd,
+				testArgs,
 				sim.NewTCP(2000),
 				sim.NewUDP(2001),
 			),
