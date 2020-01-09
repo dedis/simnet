@@ -69,6 +69,9 @@ func TestOption_Topology(t *testing.T) {
 	options := NewOptions([]Option{WithTopology(topo)})
 
 	require.Equal(t, topo.Len(), options.Topology.Len())
+
+	require.Equal(t, "tcp", TCP.String())
+	require.Equal(t, "udp", UDP.String())
 }
 
 func TestOption_Image(t *testing.T) {

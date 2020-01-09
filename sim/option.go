@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"go.dedis.ch/simnet/network"
 )
@@ -105,6 +106,10 @@ func WithTopology(topo network.Topology) Option {
 
 // Protocol is the type of the keys for the protocols.
 type Protocol string
+
+func (p Protocol) String() string {
+	return strings.ToLower(string(p))
+}
 
 const (
 	// TCP is the key for the TCP protocol.

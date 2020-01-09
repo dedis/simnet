@@ -100,8 +100,8 @@ func (s *Strategy) pullImage(ctx context.Context) error {
 func (s *Strategy) createContainers(ctx context.Context) error {
 	ports := nat.PortSet{}
 	for _, port := range s.options.Ports {
-		// TODO: handle protocol
-		ports[nat.Port(fmt.Sprintf("%d", port.Value()))] = struct{}{}
+		key := fmt.Sprintf("%d/%s", port.Value(), port.Protocol())
+		ports[nat.Port(key)] = struct{}{}
 	}
 
 	cfg := &container.Config{

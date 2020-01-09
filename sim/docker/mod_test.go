@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/simnet/metrics"
 	snet "go.dedis.ch/simnet/network"
@@ -65,7 +66,15 @@ func TestStrategy_Deploy(t *testing.T) {
 		require.Equal(t, testImage, call.cfg.Image)
 		require.EqualValues(t, call.cfg.Cmd[:len(testCmd)], testCmd)
 		require.EqualValues(t, call.cfg.Cmd[len(testCmd):], testArgs)
-		require.Equal(t, "map[2000:{} 2001:{}]", fmt.Sprintf("%v", call.cfg.ExposedPorts))
+
+		_, ok := call.cfg.ExposedPorts[nat.Port("2000/tcp")]
+		require.True(t, ok)
+		_, ok = call.cfg.ExposedPorts[nat.Port("2001/tcp")]
+		require.False(t, ok)
+		_, ok = call.cfg.ExposedPorts[nat.Port("2001/udp")]
+		require.True(t, ok)
+		_, ok = call.cfg.ExposedPorts[nat.Port("2000/udp")]
+		require.False(t, ok)
 	}
 
 	for i, call := range client.callsContainerCreate[n:] {
