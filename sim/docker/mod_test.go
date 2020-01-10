@@ -21,6 +21,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
+	"go.dedis.ch/simnet/daemon"
 	"go.dedis.ch/simnet/metrics"
 	snet "go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
@@ -55,7 +56,7 @@ func TestStrategy_Deploy(t *testing.T) {
 	// Check that application and monitor images are pulled.
 	require.Len(t, client.callsImagePull, 2)
 	require.Equal(t, fmt.Sprintf("%s/%s", ImageBaseURL, testImage), client.callsImagePull[0].ref)
-	require.Equal(t, fmt.Sprintf("%s/%s", ImageBaseURL, ImageMonitor), client.callsImagePull[1].ref)
+	require.Equal(t, fmt.Sprintf("%s/%s:%s", ImageBaseURL, ImageMonitor, daemon.Version), client.callsImagePull[1].ref)
 
 	// Check that the correct list of containers is created.
 	// - n for the application
@@ -82,7 +83,12 @@ func TestStrategy_Deploy(t *testing.T) {
 	}
 
 	for i, call := range client.callsContainerCreate[n:] {
-		require.Equal(t, ImageMonitor, call.cfg.Image)
+		require.Equal(t, fmt.Sprintf("%s:%s", ImageMonitor, daemon.Version), call.cfg.Image)
+		require.True(t, call.cfg.AttachStdin)
+		require.True(t, call.cfg.AttachStdout)
+		require.True(t, call.cfg.AttachStderr)
+		require.True(t, call.cfg.OpenStdin)
+		require.True(t, call.cfg.StdinOnce)
 		require.EqualValues(t, []string{"NET_ADMIN"}, call.hcfg.CapAdd)
 		require.Equal(t, container.NetworkMode(fmt.Sprintf("container:%s", s.containers[i].ID)), call.hcfg.NetworkMode)
 	}
@@ -116,6 +122,10 @@ func TestStrategy_Deploy(t *testing.T) {
 	require.Len(t, client.callsContainerAttach, n)
 	for i, call := range client.callsContainerAttach {
 		require.Equal(t, "id:", call.id)
+		require.True(t, call.options.Stdin)
+		require.True(t, call.options.Stdout)
+		require.True(t, call.options.Stderr)
+		require.True(t, call.options.Stream)
 
 		if i != 0 {
 			require.Equal(t, buffer.String(), call.buffer.String())

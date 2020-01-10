@@ -18,6 +18,7 @@ import (
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"go.dedis.ch/simnet/daemon"
 	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
@@ -35,7 +36,7 @@ const (
 	ImageBaseURL = "docker.io"
 	// ImageMonitor is the path to the docker image that contains the network
 	// emulator tool.
-	ImageMonitor = "dedis/simnet-monitor:latest"
+	ImageMonitor = "dedis/simnet-monitor"
 )
 
 var (
@@ -251,7 +252,8 @@ func (s *Strategy) configureContainer(
 }
 
 func (s *Strategy) configureContainers(ctx context.Context) error {
-	reader, err := s.cli.ImagePull(ctx, "docker.io/dedis/simnet-monitor:latest", types.ImagePullOptions{})
+	ref := fmt.Sprintf("%s/%s:%s", ImageBaseURL, ImageMonitor, daemon.Version)
+	reader, err := s.cli.ImagePull(ctx, ref, types.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("couldn't pull netem image: %w", err)
 	}
@@ -269,7 +271,7 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 		AttachStderr: true,
 		OpenStdin:    true,
 		StdinOnce:    true,
-		Image:        ImageMonitor,
+		Image:        fmt.Sprintf("%s:%s", ImageMonitor, daemon.Version),
 		Entrypoint:   monitorNetEmulatorCommand,
 	}
 
