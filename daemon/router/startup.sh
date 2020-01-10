@@ -1,6 +1,7 @@
 #!/bin/sh
 
 NETDEV=${NETDEV:=eth0}
+DEFAULT_MASK=${DEFAULT_MASK:=255.255.0.0}
 
 # set -o xtrace
 
@@ -27,17 +28,17 @@ iptables -t nat -I POSTROUTING -o eth0 -s 10.0.0.0/24 -j MASQUERADE
 
 CIDR=$(ip route show dev $NETDEV | grep -v default | grep -m 1 via | awk '{print $1}')
 if [ -z "$CIDR" ]; then
-    # There is no via route other than the default so the route the client
-    # must follow is the private LAN of the router running in the cluster.
-
-    # TODO: instead of using the 255.255.0.0 maks by default, it should be
-    # possible to look up the LAN mask.
+    # There is no via route other than the default so the subnetwork is calculated
+    # with the default mask and the current IP address.
     
-    CIDR=$(ifconfig $NETDEV | grep -m 1 inet | awk '{print $2}' | cut -d ":" -f 2)/16
-fi
+    IP=$(ifconfig $NETDEV | grep -m 1 inet | awk '{print $2}' | cut -d ":" -f 2)
 
-NETWORK=$(ipcalc -n $CIDR | cut -d "=" -f 2)
-MASK=$(ipcalc -m $CIDR | cut -d "=" -f 2)
+    MASK=$DEFAULT_MASK
+    NETWORK=$(ipcalc -n $IP $MASK | cut -d "=" -f 2)
+else
+    NETWORK=$(ipcalc -n $CIDR | cut -d "=" -f 2)
+    MASK=$(ipcalc -m $CIDR | cut -d "=" -f 2)
+fi
 
 echo "Using route $NETWORK $MASK"
 

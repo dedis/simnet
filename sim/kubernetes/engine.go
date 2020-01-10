@@ -63,6 +63,13 @@ const (
 	// MonitorDataFilepath is the location of the monitor data file inside the
 	// monitor container.
 	MonitorDataFilepath = "/root/data"
+
+	// DefaultNetworkDevice is the name of the network interface that Docker
+	// containers have available.
+	DefaultNetworkDevice = "eth0"
+	// DefaultNetworkMask is the mask used when the router cannot determine
+	// the cluster subnet.
+	DefaultNetworkMask = "255.255.0.0"
 )
 
 var (
@@ -654,6 +661,12 @@ func makeRouterDeployment() *appsv1.Deployment {
 							Name:  ContainerRouterName,
 							Image: fmt.Sprintf("dedis/simnet-router:%s", daemon.Version),
 							// ImagePullPolicy: "Never",
+							Env: []apiv1.EnvVar{
+								// Environment variables used in the startup
+								// script of the router.
+								{Name: "NETDEV", Value: DefaultNetworkDevice},
+								{Name: "DEFAULT_MASK", Value: DefaultNetworkMask},
+							},
 							Ports: []apiv1.ContainerPort{
 								{
 									ContainerPort: 1194,
