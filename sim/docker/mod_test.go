@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -281,9 +282,11 @@ func TestStrategy_WaitExecFailures(t *testing.T) {
 
 type testRound struct {
 	err error
+	ctx context.Context
 }
 
-func (r testRound) Execute(context.Context) error {
+func (r *testRound) Execute(ctx context.Context) error {
+	r.ctx = ctx
 	return r.err
 }
 
@@ -293,8 +296,26 @@ func TestStrategy_Execute(t *testing.T) {
 
 	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
 
-	err := s.Execute(testRound{})
+	round := &testRound{}
+	err := s.Execute(round)
 	require.NoError(t, err)
+
+	require.NotNil(t, round.ctx.Value(sim.FilesKey("testFiles")))
+	require.Nil(t, round.ctx.Value(sim.FilesKey("")))
+
+	require.InDelta(t, time.Now().Unix(), s.stats.Timestamp, float64(time.Second.Milliseconds()))
+	require.Len(t, s.stats.Nodes, 1)
+
+	ns := s.stats.Nodes["node0"]
+	require.Len(t, ns.Timestamps, 1)
+	require.Len(t, ns.TxBytes, 1)
+	require.Equal(t, ns.TxBytes[0], testStatBaseValue)
+	require.Len(t, ns.RxBytes, 1)
+	require.Equal(t, ns.RxBytes[0], testStatBaseValue+1)
+	require.Len(t, ns.CPU, 1)
+	require.Equal(t, ns.CPU[0], testStatBaseValue+2)
+	require.Len(t, ns.Memory, 1)
+	require.Equal(t, ns.Memory[0], testStatBaseValue+3)
 }
 
 func TestStrategy_ExecuteFailure(t *testing.T) {
@@ -303,7 +324,7 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 
 	e := errors.New("sim error")
 
-	err := s.Execute(testRound{err: e})
+	err := s.Execute(&testRound{err: e})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 }
@@ -318,14 +339,14 @@ func TestStrategy_MakeContextFailures(t *testing.T) {
 	e := errors.New("copy file error")
 	client.errCopyFromContainer = e
 
-	err := s.Execute(testRound{})
+	err := s.Execute(&testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e), err.Error())
 
 	client.resetErrors()
 	client.errCopyReader = true
 
-	err = s.Execute(testRound{})
+	err = s.Execute(&testRound{})
 	require.Error(t, err)
 	require.EqualError(t, errors.Unwrap(errors.Unwrap(err)), "io: read/write on closed pipe")
 
@@ -338,7 +359,7 @@ func TestStrategy_MakeContextFailures(t *testing.T) {
 		},
 	}
 
-	err = s.Execute(testRound{})
+	err = s.Execute(&testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e), err.Error())
 }
@@ -353,7 +374,7 @@ func TestStrategy_MonitorContainerFailures(t *testing.T) {
 	e := errors.New("monitor container error")
 	client.errContainerStats = e
 
-	err := s.Execute(testRound{})
+	err := s.Execute(&testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e), err.Error())
 }
@@ -362,8 +383,16 @@ func TestStrategy_WriteStats(t *testing.T) {
 	s, clean := newTestStrategy(t)
 	defer clean()
 
+	s.stats = &metrics.Stats{Timestamp: time.Now().Unix()}
+	buffer := new(bytes.Buffer)
+	enc := json.NewEncoder(buffer)
+	require.NoError(t, enc.Encode(s.stats))
+
 	err := s.WriteStats("abc")
 	require.NoError(t, err)
+
+	content, err := ioutil.ReadFile(filepath.Join(s.options.OutputDir, "abc"))
+	require.Equal(t, buffer.String(), string(content))
 }
 
 func TestStrategy_WriteStatsFailures(t *testing.T) {
@@ -387,13 +416,23 @@ func TestStrategy_WriteStatsFailures(t *testing.T) {
 }
 
 func TestStrategy_Clean(t *testing.T) {
-	s, clean := newTestStrategy(t)
+	n := 3
+	client := &testClient{numContainers: 3}
+	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
+	for i := 0; i < n; i++ {
+		s.containers = append(s.containers, makeTestContainer(fmt.Sprintf("id:node%d", i)))
+	}
 
 	err := s.Clean()
 	require.NoError(t, err)
+
+	require.Len(t, client.callsContainerStop, n)
+	for i, call := range client.callsContainerStop {
+		require.Equal(t, s.containers[i].ID, call.id)
+		require.Equal(t, ContainerStopTimeout, *call.t)
+	}
 }
 
 func TestStrategy_CleanFailures(t *testing.T) {
@@ -606,11 +645,18 @@ func (c *testClient) ContainerStats(context.Context, string, bool) (types.Contai
 	enc := json.NewEncoder(buffer)
 	enc.Encode(&types.StatsJSON{
 		Networks: map[string]types.NetworkStats{
-			"eth0": types.NetworkStats{},
+			"eth0": types.NetworkStats{
+				TxBytes: testStatBaseValue,
+				RxBytes: testStatBaseValue + 1,
+			},
 		},
 		Stats: types.Stats{
-			CPUStats:    types.CPUStats{},
-			MemoryStats: types.MemoryStats{},
+			CPUStats: types.CPUStats{
+				CPUUsage: types.CPUUsage{TotalUsage: testStatBaseValue + 2},
+			},
+			MemoryStats: types.MemoryStats{
+				Usage: testStatBaseValue + 3,
+			},
 		},
 	})
 
@@ -669,7 +715,8 @@ func (c *testClient) Events(ctx context.Context, options types.EventsOptions) (<
 }
 
 const (
-	testImage = "path/to/image"
+	testImage         = "path/to/image"
+	testStatBaseValue = uint64(123)
 )
 
 var (
@@ -701,7 +748,7 @@ func newTestStrategy(t *testing.T) (*Strategy, func()) {
 			sim.WithFileMapper(sim.FilesKey("testFiles"), sim.FileMapper{
 				Path: "/path/to/file",
 				Mapper: func(io.Reader) (interface{}, error) {
-					return nil, nil
+					return struct{}{}, nil
 				},
 			}),
 		}),

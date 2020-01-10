@@ -392,7 +392,7 @@ func (s *Strategy) monitorContainer(ctx context.Context, container types.Contain
 			ns.Memory = append(ns.Memory, data.MemoryStats.Usage)
 
 			s.statsLock.Lock()
-			s.stats.Nodes[container.Name] = *ns
+			s.stats.Nodes[container.Name[1:]] = *ns
 			s.statsLock.Unlock()
 		}
 	}()
@@ -431,6 +431,10 @@ func (s *Strategy) Execute(round sim.Round) error {
 
 		closers = append(closers, closer)
 	}
+
+	s.statsLock.Lock()
+	s.stats.Timestamp = time.Now().Unix()
+	s.statsLock.Unlock()
 
 	err = round.Execute(ctx)
 	if err != nil {
