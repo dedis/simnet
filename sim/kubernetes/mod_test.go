@@ -195,6 +195,12 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
+	e = errors.New("stream error")
+	stry.engine = &testEngine{errStreamLogs: e}
+	err = stry.Execute(testRound{})
+	require.Error(t, err)
+	require.Equal(t, err, e)
+
 	stry.engine = &testEngine{}
 	err = stry.Execute(testRound{})
 	require.Error(t, err)
@@ -311,6 +317,7 @@ type testEngine struct {
 	errFetchCerts     error
 	errDeleteAll      error
 	errWaitDeletion   error
+	errStreamLogs     error
 	errRead           error
 }
 
@@ -348,6 +355,10 @@ func (te *testEngine) DeleteAll() (watch.Interface, error) {
 
 func (te *testEngine) WaitDeletion(watch.Interface, time.Duration) error {
 	return te.errWaitDeletion
+}
+
+func (te *testEngine) StreamLogs(<-chan struct{}) error {
+	return te.errStreamLogs
 }
 
 func (te *testEngine) ReadStats(string, time.Time, time.Time) (metrics.NodeStats, error) {

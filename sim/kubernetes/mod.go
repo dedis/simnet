@@ -177,6 +177,17 @@ func (s *Strategy) makeContext() (context.Context, error) {
 
 // Execute uses the round implementation to execute a simulation round.
 func (s *Strategy) Execute(round sim.Round) error {
+	// Because it's possible to run the deployment step and the execute step
+	// in a different CLI call, the streams of the logs need to be opened and
+	// closed during the execute step.
+	closing := make(chan struct{})
+	defer close(closing)
+
+	err := s.engine.StreamLogs(closing)
+	if err != nil {
+		return err
+	}
+
 	ctx, err := s.makeContext()
 	if err != nil {
 		return err

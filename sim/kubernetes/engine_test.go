@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -24,7 +25,10 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	fakecorev1 "k8s.io/client-go/kubernetes/typed/core/v1/fake"
 	"k8s.io/client-go/rest"
+	fakerest "k8s.io/client-go/rest/fake"
 	testcore "k8s.io/client-go/testing"
 )
 
@@ -546,6 +550,72 @@ func TestEngine_WaitDeletionFailure(t *testing.T) {
 	require.Equal(t, "timeout", err.Error())
 }
 
+func TestEngine_StreamLogs(t *testing.T) {
+	cli := newFakeClientset()
+
+	engine := newKubeEngineTest(cli, "", 0)
+	ch := make(chan struct{})
+	defer close(ch)
+
+	dir, err := ioutil.TempDir(os.TempDir(), "simnet-kubernetes-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	engine.options.OutputDir = dir
+
+	engine.pods = []apiv1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "pod"}}}
+
+	err = engine.StreamLogs(ch)
+	require.NoError(t, err)
+
+	logline := "this is a log line"
+	_, err = cli.writer.Write([]byte(logline))
+	require.NoError(t, err)
+	cli.writer.Close()
+
+	engine.wgLogs.Wait()
+
+	content, err := ioutil.ReadFile(filepath.Join(dir, "logs", "pod.log"))
+	require.Equal(t, logline, string(content))
+}
+
+func TestEngine_StreamLogsFailures(t *testing.T) {
+	cli := newFakeClientset()
+
+	engine := newKubeEngineTest(cli, "", 0)
+	engine.options.OutputDir = "\000"
+	ch := make(chan struct{})
+	defer close(ch)
+
+	// Error if the log folder cannot be cleaned.
+	err := engine.StreamLogs(ch)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "couldn't clean")
+
+	// Error if the log folder cannot be created.
+	engine.options.OutputDir = "/"
+	err = engine.StreamLogs(ch)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "couldn't create log folder")
+
+	dir, err := ioutil.TempDir(os.TempDir(), "simnet-kubernetes-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	// Error if a container log file cannot be created.
+	engine.options.OutputDir = dir
+	engine.pods = []apiv1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "\000"}}}
+	err = engine.StreamLogs(ch)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "couldn't create log file")
+
+	// Error if the stream cannot be opened
+	engine.pods = []apiv1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "pod"}}}
+	cli.err = errors.New("stream error")
+	err = engine.StreamLogs(ch)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, cli.err))
+}
+
 func TestEngine_ReadStats(t *testing.T) {
 	engine := &kubeEngine{
 		fs: &testFS{},
@@ -643,4 +713,60 @@ func setMockBadClient() {
 	newClient = func(*rest.Config) (*kubernetes.Clientset, error) {
 		return nil, errors.New("client error")
 	}
+}
+
+// Some methods are not faked correctly and thus provoking crashes during the
+// tests. This client has the purpose of implementing missing features.
+type fakeClientset struct {
+	*fake.Clientset
+
+	err    error
+	reader io.ReadCloser
+	writer io.WriteCloser
+}
+
+func newFakeClientset() *fakeClientset {
+	r, w := io.Pipe()
+
+	return &fakeClientset{
+		Clientset: fake.NewSimpleClientset(),
+		reader:    r,
+		writer:    w,
+	}
+}
+
+func (cli *fakeClientset) CoreV1() corev1.CoreV1Interface {
+	return fakeCoreV1{
+		FakeCoreV1: &fakecorev1.FakeCoreV1{},
+		cli:        cli,
+	}
+}
+
+type fakeCoreV1 struct {
+	*fakecorev1.FakeCoreV1
+	cli *fakeClientset
+}
+
+func (core fakeCoreV1) Pods(string) corev1.PodInterface {
+	return fakePodInterface{
+		cli: core.cli,
+	}
+}
+
+type fakePodInterface struct {
+	*fakecorev1.FakePods
+	cli *fakeClientset
+}
+
+func (pi fakePodInterface) GetLogs(string, *apiv1.PodLogOptions) *rest.Request {
+	cl := &fakerest.RESTClient{
+		Err: pi.cli.err,
+		Resp: &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{},
+			Body:       pi.cli.reader,
+		},
+	}
+
+	return cl.Request()
 }

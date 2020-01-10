@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"go.dedis.ch/simnet/daemon"
@@ -109,6 +110,7 @@ type engine interface {
 	FetchCertificates() (sim.Certificates, error)
 	DeleteAll() (watch.Interface, error)
 	WaitDeletion(watch.Interface, time.Duration) error
+	StreamLogs(close <-chan struct{}) error
 	ReadStats(pod string, start, end time.Time) (metrics.NodeStats, error)
 	ReadFile(pod, path string) (io.Reader, error)
 }
@@ -122,6 +124,7 @@ type kubeEngine struct {
 	client    kubernetes.Interface
 	fs        fs
 	pods      []apiv1.Pod
+	wgLogs    sync.WaitGroup
 }
 
 func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeEngine, error) {
@@ -150,7 +153,7 @@ func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeE
 	}, nil
 }
 
-func (kd kubeEngine) makeContainer() apiv1.Container {
+func (kd *kubeEngine) makeContainer() apiv1.Container {
 	pp := make([]apiv1.ContainerPort, len(kd.options.Ports))
 	for i, port := range kd.options.Ports {
 		if port.Protocol() == sim.TCP {
@@ -185,7 +188,7 @@ func (kd kubeEngine) makeContainer() apiv1.Container {
 	}
 }
 
-func (kd kubeEngine) CreateDeployment() (watch.Interface, error) {
+func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 	fmt.Fprint(kd.writer, "Creating deployment...")
 
 	intf := kd.client.AppsV1().Deployments(kd.namespace)
@@ -496,6 +499,60 @@ func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) err
 	}
 }
 
+// StreamLogs open a stream for each application container that is attached to
+// the stdout and stderr. Those logs are then written in file in the output
+// directory.
+func (kd *kubeEngine) StreamLogs(close <-chan struct{}) error {
+	dir := filepath.Join(kd.options.OutputDir, "logs")
+
+	// Clean the folder to remove old log files.
+	err := os.RemoveAll(dir)
+	if err != nil {
+		return fmt.Errorf("couldn't clean log folder: %v", err)
+	}
+
+	err = os.MkdirAll(dir, 0755)
+	if err != nil {
+		return fmt.Errorf("couldn't create log folder: %v", err)
+	}
+
+	kd.wgLogs = sync.WaitGroup{}
+
+	for _, pod := range kd.pods {
+		kd.wgLogs.Add(1)
+
+		file, err := os.Create(filepath.Join(dir, fmt.Sprintf("%s.log", pod.Name)))
+		if err != nil {
+			return fmt.Errorf("couldn't create log file: %v", err)
+		}
+
+		req := kd.client.CoreV1().Pods(kd.namespace).GetLogs(pod.Name, &apiv1.PodLogOptions{
+			Container: ContainerAppName,
+			Follow:    true, // Streaming...
+		})
+
+		reader, err := req.Stream()
+		if err != nil {
+			return fmt.Errorf("couldn't open the stream: %w", err)
+		}
+
+		// This Go routine will be done when the stream is closed.
+		go func() {
+			io.Copy(file, reader)
+			kd.wgLogs.Done()
+		}()
+
+		go func() {
+			<-close
+			// Close the stream if the other side is still opened.
+			reader.Close()
+			file.Close()
+		}()
+	}
+
+	return nil
+}
+
 func (kd *kubeEngine) ReadStats(pod string, start, end time.Time) (metrics.NodeStats, error) {
 	reader, err := kd.fs.Read(pod, ContainerMonitorName, MonitorDataFilepath)
 	if err != nil {
@@ -703,7 +760,7 @@ func makeRouterDeployment() *appsv1.Deployment {
 	}
 }
 
-func (kd kubeEngine) makeRouterService() *apiv1.Service {
+func (kd *kubeEngine) makeRouterService() *apiv1.Service {
 	return &apiv1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "simnet-router",
