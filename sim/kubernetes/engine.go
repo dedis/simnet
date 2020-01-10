@@ -613,6 +613,11 @@ func makeRouterDeployment() *appsv1.Deployment {
 		LabelID:  RouterID,
 	}
 
+	// This is necessary in environment where the ip forward is not enabled
+	// by the host. It allows the container to enable it for the namespace
+	// and thus redirecting the traffic to the cluster LAN.
+	privileged := true
+
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   "simnet-router",
@@ -656,6 +661,7 @@ func makeRouterDeployment() *appsv1.Deployment {
 								},
 							},
 							SecurityContext: &apiv1.SecurityContext{
+								Privileged: &privileged,
 								Capabilities: &apiv1.Capabilities{
 									Add: []apiv1.Capability{"NET_ADMIN"},
 								},
