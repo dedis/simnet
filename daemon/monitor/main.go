@@ -31,7 +31,8 @@ func main() {
 	flagset.Parse(os.Args[1:])
 
 	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, syscall.SIGINT)
+	// Docker stop sends a SIGTERM signal to gracefully stop the containers.
+	signal.Notify(sigc, syscall.SIGTERM)
 
 	f, err := os.Create(*output)
 	checkErr(err)

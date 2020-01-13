@@ -74,7 +74,7 @@ func TestMain_StopSignal(t *testing.T) {
 		case <-done:
 			return
 		case <-time.After(10 * time.Millisecond):
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+			syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
 		case <-timeout:
 			t.Fatal("timeout")
 		}

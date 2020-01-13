@@ -28,7 +28,7 @@ import (
 const (
 	// ContainerStopTimeout is the maximum amount of time given to a container
 	// to stop.
-	ContainerStopTimeout = 2 * time.Second
+	ContainerStopTimeout = 10 * time.Second
 
 	// ExecWaitTimeout is the maximum amount of time given to an exec to end.
 	ExecWaitTimeout = 10 * time.Second
