@@ -93,4 +93,12 @@ func TestOption_Image(t *testing.T) {
 	require.Equal(t, int32(3000), options.Ports[1].Value())
 	require.Equal(t, TCP, options.Ports[2].Protocol())
 	require.Equal(t, int32(3001), options.Ports[2].Value())
+
+	options = NewOptions([]Option{WithImage(
+		"nginx",
+		nil,
+		nil,
+	)})
+
+	require.Equal(t, "library/nginx", options.Image)
 }

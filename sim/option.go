@@ -168,6 +168,11 @@ func (p UDPPort) Value() int32 {
 // WithImage is an option for simulation engines to use this Docker image as
 // the base application to run.
 func WithImage(image string, cmd, args []string, ports ...Port) Option {
+	if !strings.Contains(image, "/") {
+		// The image comes from the Docker library.
+		image = fmt.Sprintf("library/%s", image)
+	}
+
 	return func(opts *Options) {
 		opts.Image = image
 		opts.Cmd = cmd
