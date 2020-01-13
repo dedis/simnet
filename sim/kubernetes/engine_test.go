@@ -526,18 +526,45 @@ func TestEngine_DeleteFailure(t *testing.T) {
 }
 
 func TestEngine_WaitDeletion(t *testing.T) {
-	engine, _ := makeEngine(0)
+	engine, _ := makeEngine(1)
 
-	w := watch.NewFakeWithChanSize(1, false)
+	w := watch.NewFakeWithChanSize(2, false)
 
 	w.Delete(&appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app"},
+		Status: appsv1.DeploymentStatus{
+			AvailableReplicas:   0,
+			UnavailableReplicas: 0,
+		},
+	})
+	w.Delete(&appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app"},
 		Status: appsv1.DeploymentStatus{
 			AvailableReplicas:   0,
 			UnavailableReplicas: 0,
 		},
 	})
 
-	err := engine.WaitDeletion(w, testTimeout)
+	// One missing deleted pod.
+	err := engine.WaitDeletion(w, 50*time.Millisecond)
+	require.Error(t, err)
+
+	w.Delete(&appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app"},
+		Status: appsv1.DeploymentStatus{
+			AvailableReplicas:   0,
+			UnavailableReplicas: 0,
+		},
+	})
+	w.Delete(&appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "router"},
+		Status: appsv1.DeploymentStatus{
+			AvailableReplicas:   0,
+			UnavailableReplicas: 0,
+		},
+	})
+
+	err = engine.WaitDeletion(w, testTimeout)
 	require.NoError(t, err)
 }
 

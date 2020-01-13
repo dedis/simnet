@@ -442,13 +442,13 @@ func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
 		PropagationPolicy: &deletePolicy,
 	}
 
-	selector := metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", LabelApp, AppName),
-	}
-
 	err := kd.deleteService(deleteOptions)
 	if err != nil {
 		return nil, err
+	}
+
+	selector := metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", LabelApp, AppName),
 	}
 
 	intf := kd.client.AppsV1().Deployments(kd.namespace)
@@ -479,7 +479,7 @@ func (kd *kubeEngine) deleteService(opts *metav1.DeleteOptions) error {
 
 func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) error {
 	tick := time.After(timeout)
-	countDeleted := 0
+	countDeleted := make(map[string]struct{})
 
 	for {
 		select {
@@ -488,10 +488,10 @@ func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) err
 		case evt := <-w.ResultChan():
 			dpl := evt.Object.(*appsv1.Deployment)
 			if dpl.Status.AvailableReplicas == 0 && dpl.Status.UnavailableReplicas == 0 {
-				countDeleted++
+				countDeleted[dpl.Name] = struct{}{}
 			}
 
-			if countDeleted >= kd.options.Topology.Len()+1 {
+			if len(countDeleted) >= kd.options.Topology.Len()+1 {
 				// No more replicas so the deployment is deleted.
 				return nil
 			}
