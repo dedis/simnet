@@ -1,0 +1,65 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"os"
+
+	"go.dedis.ch/simnet"
+	"go.dedis.ch/simnet/network"
+	"go.dedis.ch/simnet/sim"
+	"go.dedis.ch/simnet/sim/docker"
+)
+
+type simRound struct{}
+
+func (s simRound) Execute(ctx context.Context) error {
+	nodes := ctx.Value(sim.NodeInfoKey{}).([]sim.NodeInfo)
+	fmt.Printf("Nodes: %v\n", nodes)
+
+	for _, node := range nodes {
+		resp, err := http.Get(fmt.Sprintf("http://%s:80", node.Address))
+		if err != nil {
+			return err
+		}
+
+		defer resp.Body.Close()
+
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Found page of length %d bytes for %s\n", len(body), node.Name)
+	}
+
+	return nil
+}
+
+func main() {
+	options := []sim.Option{
+		sim.WithTopology(
+			network.NewSimpleTopology(3, 25),
+		),
+		sim.WithImage(
+			"library/nginx", // DockerHub image
+			nil,             // CMD if needed
+			nil,             // ARGS if needed
+			sim.NewTCP(80),
+		),
+	}
+
+	engine, err := docker.NewStrategy(options...)
+	if err != nil {
+		panic(err)
+	}
+
+	sim := simnet.NewSimulation(simRound{}, engine)
+
+	err = sim.Run(os.Args)
+	if err != nil {
+		panic(err)
+	}
+}

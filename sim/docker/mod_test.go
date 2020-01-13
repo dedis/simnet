@@ -292,7 +292,9 @@ func (r *testRound) Execute(ctx context.Context) error {
 }
 
 func TestStrategy_Execute(t *testing.T) {
-	s, clean := newTestStrategy(t)
+	n := 3
+	client := &testClient{numContainers: n}
+	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
 	round := &testRound{}
@@ -303,6 +305,14 @@ func TestStrategy_Execute(t *testing.T) {
 
 	require.NotNil(t, round.ctx.Value(sim.FilesKey("testFiles")))
 	require.Nil(t, round.ctx.Value(sim.FilesKey("")))
+
+	nodes := round.ctx.Value(sim.NodeInfoKey{}).([]sim.NodeInfo)
+	require.Len(t, nodes, n)
+	for i, node := range nodes {
+		require.Equal(t, containerName(s.containers[i]), node.Name)
+		netcfg := s.containers[i].NetworkSettings.Networks[DefaultContainerNetwork]
+		require.Equal(t, netcfg.IPAddress, node.Address)
+	}
 
 	require.InDelta(t, time.Now().Unix(), s.stats.Timestamp, float64(time.Second.Milliseconds()))
 	require.Len(t, s.stats.Nodes, len(s.containers))

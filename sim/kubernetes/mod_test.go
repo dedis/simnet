@@ -159,6 +159,13 @@ func TestStrategy_Execute(t *testing.T) {
 		require.Equal(t, len(stry.pods), len(contents))
 		require.Equal(t, "content", contents[sim.Identifier{Index: 0, ID: "a", IP: "a.a.a.a"}])
 
+		nodes := ctx.Value(sim.NodeInfoKey{}).([]sim.NodeInfo)
+		require.Len(t, nodes, len(stry.pods))
+		for i, node := range nodes {
+			require.Equal(t, stry.pods[i].Name, node.Name)
+			require.Equal(t, stry.pods[i].Status.PodIP, node.Address)
+		}
+
 		done <- struct{}{}
 	}
 

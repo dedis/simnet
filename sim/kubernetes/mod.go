@@ -148,6 +148,14 @@ func (s *Strategy) Deploy() error {
 func (s *Strategy) makeContext() (context.Context, error) {
 	ctx := context.Background()
 
+	nodes := make([]sim.NodeInfo, len(s.pods))
+	for i, pod := range s.pods {
+		nodes[i].Name = pod.Name
+		nodes[i].Address = pod.Status.PodIP
+	}
+
+	ctx = context.WithValue(ctx, sim.NodeInfoKey{}, nodes)
+
 	for key, fm := range s.options.Files {
 		files := make(sim.Files)
 

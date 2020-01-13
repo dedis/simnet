@@ -4,33 +4,23 @@
 [![Coverage Status](https://coveralls.io/repos/github/dedis/simnet/badge.svg?branch=master)](https://coveralls.io/github/dedis/simnet?branch=master)
 ![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/dedis/simnet?label=version)
 
-Simnet is a tool to simulate a decentralized application using the cloud to
+SimNet is a tool to simulate a decentralized application using the cloud to
 host the simulation nodes. It provides multiple configurations to affect the
 topology so that specific link between two nodes can have a delay or a loss
-of packets.
+of packets for instance.
 
-TODO: extend the doc
+The tool is designed to work with three phases:
+ - Deployment: everything the simulation needs is deployed to the cloud.
+ - Execution: the actual simulation is performed and statistics are written
+ to a JSON file.
+ - Cleaning: it wipes everything in scope to the simulation.
 
-## Daemons
-
-Some strategies like Kubernetes might need additionnal containers to work. These
-are built independently using the automated build of DockerHub.
-
-| Router | Router Init | Monitor |
-| ------ | ----------- | ------- |
-| [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-router/timeline) | [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router-init?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-router-init/timeline) | [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-monitor?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-monitor/timeline) |
-
-Docker images for the daemons have their own version that will trigger a build
-for each new version. The master branch will also build its own tag for each
-new commit.
-
-Dockerhub is configured to automatically create the following tags:
-- `latest` for the master branch
-- `x.y.z` for each `daemon-vx.y.z` tag on the repository
+Thoses phases are designed to be independant so that they can be run separatly
+which means that simulations can be executed multiple times without deploying.
 
 ## Strategies
 
-The environment the simulation is running depends on the chosen strategy. Two
+The environment the simulation is running on depends on the chosen strategy. Two
 are currently available: Kubernetes and Docker.
 
 It is completly interchangeable so that you can test your simulation locally with
@@ -54,6 +44,110 @@ to create one container per Node. Each of those containers will need another
 temporary container to configure the network emulation (latencies, etc...) but
 they will terminate before the simulation begins and they are booted one after
 the other.
+
+## Daemons
+
+Some strategies like Kubernetes might need additionnal containers to work. These
+are built independently using the automated build of DockerHub.
+
+| Router | Router Init | Monitor |
+| ------ | ----------- | ------- |
+| [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-router/timeline) | [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-router-init?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-router-init/timeline) | [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/dedis/simnet-monitor?style=flat-square)](https://hub.docker.com/repository/docker/dedis/simnet-monitor/timeline) |
+
+Docker images for the daemons have their own version that will trigger a build
+for each new version. The master branch will also build its own tag for each
+new commit.
+
+Dockerhub is configured to automatically create the following tags:
+- `latest` for the master branch
+- `x.y.z` for each `daemon-vx.y.z` tag on the repository
+
+# Getting started
+
+## Writing the simulation
+
+A basic template with the Docker strategy is shown below:
+
+```go
+type simRound struct {}
+
+func (s simRound) Execute(ctx context.Context) error {
+    return nil
+}
+
+func main() {
+    engine, err := docker.NewStrategy(options...)
+	if err != nil {
+		panic(err)
+	}
+
+	sim := simnet.NewSimulation(simRound{}, engine)
+
+	err = sim.Run(os.Args)
+	if err != nil {
+		panic(err)
+	}
+}
+```
+
+A few number of options is necessary to run an application.
+
+```go
+options := []sim.Option{
+    sim.WithTopology(
+        net.NewSimpleTopology(3, 25),
+    ),
+    sim.WithImage(
+        "nginx", // DockerHub image
+        nil, // CMD if needed
+        nil, // ARGS if needed
+        sim.NewTCP(8080),
+    ),
+}
+```
+
+Finally, the simulation tool provides a bunch of command-line arguments so that
+it is easier to run the different phases. Assuming a `main.go`, use the
+following:
+
+```bash
+# Runs the simulation from A to Z.
+go run main.go
+
+# ... or do it step by step
+go run main.go -do-deploy
+
+# This can be done multiple times but be aware that statistics will be
+# overwritten.
+go run main.go -do-execute
+
+# Important to reduce the cost
+go run main.go -do-clean
+```
+
+## Context
+
+The context passed to the round execution contains some pieces of information
+that can be useful when running a simulation.
+
+### NodeInfo
+```go
+nodes := ctx.Value(sim.NodeInfoKey{}).([]sim.NodeInfo)
+addr := nodes[0].Address
+```
+
+### Files
+A file mapper can be specifiec in the strategy options. This file will be read
+on each application node and stored in the execution context.
+
+```go
+files := ctx.Value(sim.FilesKey("my.conf")).(sim.Files)
+for ident, file := range files {
+    ...
+}
+```
+
+See the skipchain example for more details.
 
 # How to
 

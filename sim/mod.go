@@ -30,3 +30,15 @@ type Strategy interface {
 	// Clean wipes off any resources that has been created for the simulation.
 	Clean() error
 }
+
+// NodeInfoKey is the single value key that is available in execution context
+// to get information about the simulation nodes.
+type NodeInfoKey struct{}
+
+// NodeInfo is the element value of the array available in the execution
+// context.
+// Use `nodes := ctx.Value(NodesKey{}).([]NodeInfo)` to retrieve the data.
+type NodeInfo struct {
+	Name    string
+	Address string
+}

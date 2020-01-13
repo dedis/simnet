@@ -371,6 +371,17 @@ func (s *Strategy) Deploy() error {
 func (s *Strategy) makeExecutionContext() (context.Context, error) {
 	ctx := context.Background()
 
+	// Provide information about the nodes.
+	nodes := make([]sim.NodeInfo, len(s.containers))
+	for i, container := range s.containers {
+		netcfg := container.NetworkSettings.Networks[DefaultContainerNetwork]
+
+		nodes[i].Name = containerName(container)
+		nodes[i].Address = netcfg.IPAddress
+	}
+	ctx = context.WithValue(ctx, sim.NodeInfoKey{}, nodes)
+
+	// Read files required by the simulation.
 	for key, fm := range s.options.Files {
 		files := make(sim.Files)
 

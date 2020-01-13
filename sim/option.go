@@ -15,7 +15,7 @@ var userHomeDir = os.UserHomeDir
 // Options contains the different options for a simulation execution.
 type Options struct {
 	OutputDir string
-	Files     map[interface{}]FileMapper
+	Files     map[FilesKey]FileMapper
 	Topology  network.Topology
 	Image     string
 	Cmd       []string
@@ -26,7 +26,7 @@ type Options struct {
 // NewOptions creates empty options.
 func NewOptions(opts []Option) *Options {
 	o := &Options{
-		Files: make(map[interface{}]FileMapper),
+		Files: make(map[FilesKey]FileMapper),
 	}
 
 	for _, f := range opts {
