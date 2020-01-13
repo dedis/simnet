@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"go.dedis.ch/simnet/daemon"
@@ -37,6 +38,17 @@ const (
 	// ImageMonitor is the path to the docker image that contains the network
 	// emulator tool.
 	ImageMonitor = "dedis/simnet-monitor"
+
+	// ContainerLabelKey is the label key assigned to every application
+	// container.
+	ContainerLabelKey = "go.dedis.ch.simnet.container"
+	// ContainerLabelValue is the value for application containers.
+	ContainerLabelValue = "app"
+
+	// DefaultContainerNetwork is the default network used by Docker when no
+	// additionnal network is required when creating the container.
+	// This should be different whatsoever the Docker environment settings.
+	DefaultContainerNetwork = "bridge"
 )
 
 var (
@@ -68,10 +80,14 @@ type Strategy struct {
 	out        io.Writer
 	cli        client.APIClient
 	options    *sim.Options
-	containers []types.ContainerJSON
+	containers []types.Container
 	stats      *metrics.Stats
 	statsLock  sync.Mutex
 	encoder    Encoder
+
+	// Depending on which step the simulation is booting, it is necessary
+	// to know if some states need to be loaded.
+	updated bool
 }
 
 // NewStrategy creates a docker strategy for simulations.
@@ -85,12 +101,35 @@ func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 		out:        os.Stdout,
 		cli:        cli,
 		options:    sim.NewOptions(opts),
-		containers: make([]types.ContainerJSON, 0),
+		containers: make([]types.Container, 0),
 		stats: &metrics.Stats{
 			Nodes: make(map[string]metrics.NodeStats),
 		},
 		encoder: jsonEncoder,
 	}, nil
+}
+
+// Get the list of containers running in the Docker environment that are in
+// scope with the simulation.
+func (s *Strategy) refreshContainers(ctx context.Context) error {
+	if s.updated {
+		// The list have already been refreshed.
+		return nil
+	}
+
+	args := filters.NewArgs()
+	args.Add("label", fmt.Sprintf("%s=%s", ContainerLabelKey, ContainerLabelValue))
+
+	containers, err := s.cli.ContainerList(ctx, types.ContainerListOptions{
+		Filters: args,
+	})
+	if err != nil {
+		return err
+	}
+
+	s.containers = containers
+
+	return nil
 }
 
 func (s *Strategy) waitImagePull(reader io.Reader) error {
@@ -143,8 +182,11 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 	}
 
 	cfg := &container.Config{
-		Image:        s.options.Image,
-		Cmd:          append(append([]string{}, s.options.Cmd...), s.options.Args...),
+		Image: s.options.Image,
+		Cmd:   append(append([]string{}, s.options.Cmd...), s.options.Args...),
+		Labels: map[string]string{
+			ContainerLabelKey: ContainerLabelValue,
+		},
 		ExposedPorts: ports,
 	}
 
@@ -162,13 +204,11 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+	}
 
-		container, err := s.cli.ContainerInspect(ctx, resp.ID)
-		if err != nil {
-			return err
-		}
-
-		s.containers = append(s.containers, container)
+	err := s.refreshContainers(ctx)
+	if err != nil {
+		return fmt.Errorf("couldn't refresh the list of containers: %w", err)
 	}
 
 	return nil
@@ -198,7 +238,7 @@ func waitExec(containerID string, msgCh <-chan events.Message, errCh <-chan erro
 
 func (s *Strategy) configureContainer(
 	ctx context.Context,
-	c types.ContainerJSON,
+	c types.Container,
 	cfg *container.Config,
 	mapping map[network.Node]string,
 	msgCh <-chan events.Message,
@@ -232,7 +272,7 @@ func (s *Strategy) configureContainer(
 		return fmt.Errorf("couldn't start netem container: %w", err)
 	}
 
-	rules := s.options.Topology.Rules(network.Node(c.Name[1:]), mapping)
+	rules := s.options.Topology.Rules(network.Node(containerName(c)), mapping)
 
 	enc := json.NewEncoder(conn.Conn)
 	err = enc.Encode(&rules)
@@ -278,7 +318,7 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 	// Create the mapping between node names and IPs.
 	mapping := make(map[network.Node]string)
 	for _, c := range s.containers {
-		mapping[network.Node(c.Name[1:])] = c.NetworkSettings.DefaultNetworkSettings.IPAddress
+		mapping[network.Node(containerName(c))] = c.NetworkSettings.Networks[DefaultContainerNetwork].IPAddress
 	}
 
 	// Caller is responsible to cancel the context.
@@ -323,6 +363,7 @@ func (s *Strategy) Deploy() error {
 	}
 
 	fmt.Fprintln(s.out, "Deployment... Done.")
+	s.updated = true // All states are loaded at that point.
 
 	return nil
 }
@@ -347,8 +388,8 @@ func (s *Strategy) makeExecutionContext() (context.Context, error) {
 
 			ident := sim.Identifier{
 				Index: i,
-				ID:    network.Node(container.Name),
-				IP:    container.NetworkSettings.DefaultNetworkSettings.IPAddress,
+				ID:    network.Node(containerName(container)),
+				IP:    container.NetworkSettings.Networks[DefaultContainerNetwork].IPAddress,
 			}
 
 			files[ident], err = fm.Mapper(tr)
@@ -365,7 +406,7 @@ func (s *Strategy) makeExecutionContext() (context.Context, error) {
 	return ctx, nil
 }
 
-func (s *Strategy) monitorContainer(ctx context.Context, container types.ContainerJSON) (func(), error) {
+func (s *Strategy) monitorContainer(ctx context.Context, container types.Container) (func(), error) {
 	resp, err := s.cli.ContainerStats(ctx, container.ID, true)
 	if err != nil {
 		return nil, err
@@ -392,7 +433,7 @@ func (s *Strategy) monitorContainer(ctx context.Context, container types.Contain
 			ns.Memory = append(ns.Memory, data.MemoryStats.Usage)
 
 			s.statsLock.Lock()
-			s.stats.Nodes[container.Name[1:]] = *ns
+			s.stats.Nodes[containerName(container)] = *ns
 			s.statsLock.Unlock()
 		}
 	}()
@@ -408,6 +449,11 @@ func (s *Strategy) monitorContainer(ctx context.Context, container types.Contain
 // Execute takes the round and execute it against the context created from the
 // options.
 func (s *Strategy) Execute(round sim.Round) error {
+	err := s.refreshContainers(context.Background())
+	if err != nil {
+		return fmt.Errorf("couldn't update the states: %w", err)
+	}
+
 	ctx, err := s.makeExecutionContext()
 	if err != nil {
 		return fmt.Errorf("couldn't create the context: %w", err)
@@ -442,6 +488,7 @@ func (s *Strategy) Execute(round sim.Round) error {
 	}
 
 	fmt.Fprintln(s.out, "Execution... Done.")
+	s.updated = true
 
 	return nil
 }
@@ -471,6 +518,11 @@ func (s *Strategy) Clean() error {
 	ctx := context.Background()
 	errs := []error{}
 
+	err := s.refreshContainers(ctx)
+	if err != nil {
+		return fmt.Errorf("couldn't get running containers: %w", err)
+	}
+
 	timeout := ContainerStopTimeout
 
 	for _, container := range s.containers {
@@ -485,10 +537,18 @@ func (s *Strategy) Clean() error {
 	}
 
 	fmt.Fprintln(s.out, "Cleaning... Done.")
+	s.updated = true // All states are loaded at that point.
 
 	return nil
 }
 
 func (s *Strategy) String() string {
 	return "Docker"
+}
+
+func containerName(c types.Container) string {
+	// The name is well-defined and thus it must be present as the first index
+	// and no additionnal names should be there. The first character is stripped
+	// to remove the "/" character.
+	return c.Names[0][1:]
 }

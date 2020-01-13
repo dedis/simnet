@@ -105,11 +105,9 @@ func TestStrategy_Deploy(t *testing.T) {
 	}
 
 	// Check that the containers are correctly fetched.
-	require.Len(t, client.callsContainerInspect, n)
-	require.Len(t, s.containers, n)
-	for i, call := range client.callsContainerInspect {
-		require.Equal(t, s.containers[i].ID, call.id)
-	}
+	require.Len(t, client.callsContainerList, 1)
+	value := fmt.Sprintf("%s=%s", ContainerLabelKey, ContainerLabelValue)
+	require.True(t, client.callsContainerList[0].options.Filters.ExactMatch("label", value))
 
 	// Check that the events are listened.
 	require.Len(t, client.callsEvents, 1)
@@ -132,6 +130,9 @@ func TestStrategy_Deploy(t *testing.T) {
 			require.Equal(t, buffer.String(), call.buffer.String())
 		}
 	}
+
+	// Check that the states are marked as updated.
+	require.True(t, s.updated)
 }
 
 func TestStrategy_PullImageFailures(t *testing.T) {
@@ -187,13 +188,13 @@ func TestStrategy_CreateContainerFailures(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
-	e = errors.New("insepct container error")
+	e = errors.New("container list error")
 	client.resetErrors()
-	client.errContainerInspect = e
+	client.errContainerList = e
 
 	err = s.Deploy()
 	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.True(t, errors.Is(err, e), err.Error())
 }
 
 func TestStrategy_ConfigureContainersFailures(t *testing.T) {
@@ -201,7 +202,7 @@ func TestStrategy_ConfigureContainersFailures(t *testing.T) {
 	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
+	s.containers = []types.Container{makeTestContainer("id:node0")}
 
 	e := errors.New("pull netem image error")
 	client.errImagePull = e
@@ -294,17 +295,17 @@ func TestStrategy_Execute(t *testing.T) {
 	s, clean := newTestStrategy(t)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
-
 	round := &testRound{}
 	err := s.Execute(round)
 	require.NoError(t, err)
+
+	require.True(t, s.updated)
 
 	require.NotNil(t, round.ctx.Value(sim.FilesKey("testFiles")))
 	require.Nil(t, round.ctx.Value(sim.FilesKey("")))
 
 	require.InDelta(t, time.Now().Unix(), s.stats.Timestamp, float64(time.Second.Milliseconds()))
-	require.Len(t, s.stats.Nodes, 1)
+	require.Len(t, s.stats.Nodes, len(s.containers))
 
 	ns := s.stats.Nodes["node0"]
 	require.Len(t, ns.Timestamps, 1)
@@ -319,12 +320,21 @@ func TestStrategy_Execute(t *testing.T) {
 }
 
 func TestStrategy_ExecuteFailure(t *testing.T) {
-	s, clean := newTestStrategy(t)
+	client := &testClient{numContainers: 3}
+	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
 	e := errors.New("sim error")
 
 	err := s.Execute(&testRound{err: e})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
+
+	s.updated = false
+	e = errors.New("container list error")
+	client.errContainerList = e
+
+	err = s.Execute(&testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 }
@@ -334,7 +344,7 @@ func TestStrategy_MakeContextFailures(t *testing.T) {
 	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
+	s.containers = []types.Container{makeTestContainer("id:node0")}
 
 	e := errors.New("copy file error")
 	client.errCopyFromContainer = e
@@ -369,7 +379,7 @@ func TestStrategy_MonitorContainerFailures(t *testing.T) {
 	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
+	s.containers = []types.Container{makeTestContainer("id:node0")}
 
 	e := errors.New("monitor container error")
 	client.errContainerStats = e
@@ -428,6 +438,8 @@ func TestStrategy_Clean(t *testing.T) {
 	err := s.Clean()
 	require.NoError(t, err)
 
+	require.True(t, s.updated)
+
 	require.Len(t, client.callsContainerStop, n)
 	for i, call := range client.callsContainerStop {
 		require.Equal(t, s.containers[i].ID, call.id)
@@ -440,12 +452,19 @@ func TestStrategy_CleanFailures(t *testing.T) {
 	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
-	s.containers = []types.ContainerJSON{makeTestContainer("id:node0")}
+	client.errContainerList = errors.New("container list error")
+	err := s.Clean()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, client.errContainerList), err.Error())
+
+	s.updated = true
+	s.containers = []types.Container{makeTestContainer("id:node0")}
 
 	e := errors.New("container stop error")
+	client.resetErrors()
 	client.errContainerStop = e
 
-	err := s.Clean()
+	err = s.Clean()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), e.Error())
 }
@@ -525,9 +544,9 @@ type testCallContainerStart struct {
 	options types.ContainerStartOptions
 }
 
-type testCallContainerInspect struct {
-	ctx context.Context
-	id  string
+type testCallContainerList struct {
+	ctx     context.Context
+	options types.ContainerListOptions
 }
 
 type testCallContainerStop struct {
@@ -545,13 +564,13 @@ type testClient struct {
 	*client.Client
 	numContainers int
 
-	callsImagePull        []testCallPullImage
-	callsContainerCreate  []testCallContainerCreate
-	callsContainerAttach  []testCallContainerAttach
-	callsContainerStart   []testCallContainerStart
-	callsContainerInspect []testCallContainerInspect
-	callsContainerStop    []testCallContainerStop
-	callsEvents           []testCallEvents
+	callsImagePull       []testCallPullImage
+	callsContainerCreate []testCallContainerCreate
+	callsContainerAttach []testCallContainerAttach
+	callsContainerStart  []testCallContainerStart
+	callsContainerStop   []testCallContainerStop
+	callsContainerList   []testCallContainerList
+	callsEvents          []testCallEvents
 
 	bufferPullImage *bytes.Buffer
 
@@ -560,8 +579,8 @@ type testClient struct {
 	errContainerCreate   error
 	errContainerAttach   error
 	errContainerStart    error
-	errContainerInspect  error
 	errContainerStop     error
+	errContainerList     error
 	errContainerStats    error
 	errCopyFromContainer error
 	errAttachConn        error
@@ -576,8 +595,8 @@ func (c *testClient) resetErrors() {
 	c.errContainerCreate = nil
 	c.errContainerAttach = nil
 	c.errContainerStart = nil
-	c.errContainerInspect = nil
 	c.errContainerStop = nil
+	c.errContainerList = nil
 	c.errContainerStats = nil
 	c.errCopyFromContainer = nil
 	c.errAttachConn = nil
@@ -619,24 +638,27 @@ func (c *testClient) ContainerStart(ctx context.Context, id string, options type
 	return c.errContainerStart
 }
 
-func makeTestContainer(id string) types.ContainerJSON {
-	return types.ContainerJSON{
-		ContainerJSONBase: &types.ContainerJSONBase{
-			Name: fmt.Sprintf("/%s", id[3:]),
-			ID:   id,
-		},
-		NetworkSettings: &types.NetworkSettings{
-			DefaultNetworkSettings: types.DefaultNetworkSettings{
-				IPAddress: fmt.Sprintf("ip:%s", id[3:]),
+func makeTestContainer(id string) types.Container {
+	return types.Container{
+		Names: []string{fmt.Sprintf("/%s", id[3:])},
+		ID:    id,
+		NetworkSettings: &types.SummaryNetworkSettings{
+			Networks: map[string]*network.EndpointSettings{
+				DefaultContainerNetwork: {IPAddress: fmt.Sprintf("ip:%s", id[3:])},
 			},
 		},
 	}
 }
 
-func (c *testClient) ContainerInspect(ctx context.Context, id string) (types.ContainerJSON, error) {
-	c.callsContainerInspect = append(c.callsContainerInspect, testCallContainerInspect{ctx, id})
+func (c *testClient) ContainerList(ctx context.Context, options types.ContainerListOptions) ([]types.Container, error) {
+	c.callsContainerList = append(c.callsContainerList, testCallContainerList{ctx, options})
 
-	return makeTestContainer(id), c.errContainerInspect
+	containers := make([]types.Container, c.numContainers)
+	for i := range containers {
+		containers[i] = makeTestContainer(fmt.Sprintf("id:node%d", i))
+	}
+
+	return containers, c.errContainerList
 }
 
 func (c *testClient) ContainerStats(context.Context, string, bool) (types.ContainerStats, error) {
@@ -752,7 +774,7 @@ func newTestStrategy(t *testing.T) (*Strategy, func()) {
 				},
 			}),
 		}),
-		containers: make([]types.ContainerJSON, 0),
+		containers: make([]types.Container, 0),
 		stats: &metrics.Stats{
 			Nodes: make(map[string]metrics.NodeStats),
 		},

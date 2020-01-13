@@ -1,4 +1,4 @@
 monitor/data
 plotter/plotter
-example.png
-result.json
+*.png
+*.json
