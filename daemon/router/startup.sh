@@ -42,4 +42,15 @@ fi
 
 echo "Using route $NETWORK $MASK"
 
-openvpn --config server.conf --push "route $NETWORK $MASK"
+terminate() {
+    echo "Caught signal. Process will stop."
+    kill -9 "$child" 2>/dev/null
+}
+
+# Docker sends SIGTERM to let the container stops by itself.
+trap terminate TERM
+
+openvpn --config server.conf --push "route $NETWORK $MASK" &
+
+child=$!
+wait "$child"
