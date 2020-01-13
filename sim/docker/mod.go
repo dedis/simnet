@@ -543,7 +543,12 @@ func (s *Strategy) Clean() error {
 }
 
 func (s *Strategy) String() string {
-	return "Docker"
+	host := os.Getenv("DOCKER_HOST")
+	if host == "" {
+		host = client.DefaultDockerHost
+	}
+
+	return fmt.Sprintf("Docker[%s] @ %s", s.cli.ClientVersion(), host)
 }
 
 func containerName(c types.Container) string {

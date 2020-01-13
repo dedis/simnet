@@ -473,7 +473,11 @@ func TestStrategy_String(t *testing.T) {
 	s, clean := newTestStrategy(t)
 	defer clean()
 
-	require.Equal(t, "Docker", s.String())
+	require.NoError(t, os.Setenv("DOCKER_HOST", ""))
+	require.Equal(t, fmt.Sprintf("Docker[1.0] @ %s", client.DefaultDockerHost), s.String())
+
+	require.NoError(t, os.Setenv("DOCKER_HOST", "docker.host"))
+	require.Equal(t, fmt.Sprintf("Docker[1.0] @ docker.host"), s.String())
 }
 
 type testConn struct {
@@ -602,6 +606,10 @@ func (c *testClient) resetErrors() {
 	c.errAttachConn = nil
 	c.errEvent = nil
 	c.errCopyReader = false
+}
+
+func (c *testClient) ClientVersion() string {
+	return "1.0"
 }
 
 func (c *testClient) ImagePull(ctx context.Context, ref string, opts types.ImagePullOptions) (io.ReadCloser, error) {
