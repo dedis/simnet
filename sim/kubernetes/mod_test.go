@@ -216,6 +216,12 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 	stry.options = sim.NewOptions([]sim.Option{})
 	e = errors.New("round error")
 	err = stry.Execute(testRound{err: e})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
+
+	e = errors.New("configuration error")
+	err = stry.Execute(testRound{errCfg: e})
+	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 }
 
@@ -372,8 +378,16 @@ func (te *testEngine) ReadStats(string, time.Time, time.Time) (metrics.NodeStats
 	return metrics.NodeStats{}, te.errRead
 }
 
-func (te *testEngine) ReadFile(string, string) (io.Reader, error) {
-	return te.reader, te.errRead
+func (te *testEngine) Read(pod, path string) (io.ReadCloser, error) {
+	return nil, te.errRead
+}
+
+func (te *testEngine) Write(node, path string, content io.Reader) error {
+	return nil
+}
+
+func (te *testEngine) Exec(node string, cmd []string) ([]byte, error) {
+	return nil, nil
 }
 
 func (te *testEngine) String() string {
@@ -381,8 +395,13 @@ func (te *testEngine) String() string {
 }
 
 type testRound struct {
-	h   func(context.Context)
-	err error
+	h      func(context.Context)
+	err    error
+	errCfg error
+}
+
+func (tr testRound) Configure(sio sim.IO) error {
+	return tr.errCfg
 }
 
 func (tr testRound) Execute(ctx context.Context) error {

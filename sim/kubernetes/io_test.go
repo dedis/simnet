@@ -18,7 +18,7 @@ func TestIO_Read(t *testing.T) {
 		return testExecutorFactory(nil, nil, u)
 	}
 
-	fs := kfs{
+	fs := kio{
 		restclient: &restfake.RESTClient{},
 	}
 
@@ -36,7 +36,7 @@ func TestIO_ReadFailure(t *testing.T) {
 		return testExecutorFactory(e, nil, u)
 	}
 
-	fs := kfs{
+	fs := kio{
 		restclient: &restfake.RESTClient{},
 	}
 
@@ -61,18 +61,18 @@ func TestIO_Write(t *testing.T) {
 		return testExecutorFactory(nil, out, u)
 	}
 
-	fs := kfs{
+	fs := kio{
 		restclient: &restfake.RESTClient{},
 	}
 
-	w, done, err := fs.Write("", "", []string{})
+	stream, err := fs.Write("", "", "")
 	require.NoError(t, err)
-	require.NotNil(t, w)
+	require.NotNil(t, stream)
 
 	content := []byte("deadbeef")
-	w.Write(content)
-	w.Close()
-	err = <-done
+	stream.Write(content)
+	stream.Close()
+	err = <-stream.E
 	require.NoError(t, err)
 	require.Equal(t, content, out.Bytes())
 }
@@ -83,11 +83,11 @@ func TestIO_WriteFailure(t *testing.T) {
 		return testExecutorFactory(e, nil, u)
 	}
 
-	fs := kfs{
+	fs := kio{
 		restclient: &restfake.RESTClient{},
 	}
 
-	_, _, err := fs.Write("", "", []string{})
+	_, err := fs.Write("", "", "")
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
@@ -95,10 +95,10 @@ func TestIO_WriteFailure(t *testing.T) {
 		return testFailingExecutorFactory(u)
 	}
 
-	_, done, err := fs.Write("", "", []string{})
+	stream, err := fs.Write("", "", "")
 	require.NoError(t, err)
 
-	err = <-done
+	err = <-stream.E
 	require.Error(t, err)
 	require.Equal(t, "command failed: stream error", err.Error())
 }

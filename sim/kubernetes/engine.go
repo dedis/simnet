@@ -1,7 +1,7 @@
 package kubernetes
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -112,7 +112,9 @@ type engine interface {
 	WaitDeletion(watch.Interface, time.Duration) error
 	StreamLogs(close <-chan struct{}) error
 	ReadStats(pod string, start, end time.Time) (metrics.NodeStats, error)
-	ReadFile(pod, path string) (io.Reader, error)
+	Read(pod, path string) (io.ReadCloser, error)
+	Write(node, path string, content io.Reader) error
+	Exec(node string, cmd []string) ([]byte, error)
 }
 
 type kubeEngine struct {
@@ -122,7 +124,7 @@ type kubeEngine struct {
 	namespace string
 	config    *rest.Config
 	client    kubernetes.Interface
-	fs        fs
+	kio       IO
 	pods      []apiv1.Pod
 	wgLogs    sync.WaitGroup
 }
@@ -145,7 +147,7 @@ func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeE
 		host:      u.Hostname(),
 		config:    config,
 		client:    client,
-		fs: kfs{
+		kio: kio{
 			restclient: client.CoreV1().RESTClient(),
 			namespace:  ns,
 			config:     config,
@@ -245,6 +247,26 @@ func (kd *kubeEngine) WaitDeployment(w watch.Interface) error {
 	}
 }
 
+func (kd *kubeEngine) configureContainer(pods []apiv1.Pod) error {
+	// Write the host aliases for each of the pod of the simulation. It allows
+	// the nodes to contact the others using a pre-defined hostname but without
+	// expecting a DNS as no assumption can be made about the DNS configuration.
+	buffer := new(bytes.Buffer)
+	for _, pod := range pods {
+		buffer.WriteString(fmt.Sprintf("%s\t%s\n", pod.Status.PodIP, pod.Labels[LabelNode]))
+	}
+
+	for _, pod := range pods {
+		fmt.Fprintf(kd.writer, "Configuring pod %s\n", pod.Name)
+		err := kd.Write(pod.Labels[LabelNode], "/etc/hosts", bytes.NewBuffer(buffer.Bytes()))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 	fmt.Fprintf(kd.writer, "Fetching pods...")
 
@@ -262,6 +284,12 @@ func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 
 	fmt.Fprintln(kd.writer, goterm.ResetLine("Fetching pods... ok"))
 	kd.pods = pods.Items
+
+	err = kd.configureContainer(pods.Items)
+	if err != nil {
+		return nil, err
+	}
+
 	return pods.Items, nil
 }
 
@@ -278,19 +306,19 @@ func (kd *kubeEngine) UploadConfig() error {
 	for _, pod := range kd.pods {
 		// Logs are written in the stdout of the main process so we get the
 		// logs from the Kubernetes drivers.
-		writer, _, err := kd.fs.Write(pod.Name, "monitor", []string{"sh", "-c", "./netem -log /proc/1/fd/1 -"})
+		stream, err := kd.kio.Exec(pod.Name, ContainerMonitorName, []string{"sh", "-c", "./netem -log /proc/1/fd/1 -"})
 		if err != nil {
 			return err
 		}
 
 		node := network.Node(pod.Labels[LabelNode])
 
-		enc := json.NewEncoder(writer)
-		err = enc.Encode(kd.options.Topology.Rules(node, mapping))
+		enc := json.NewEncoder(stream)
+		enc.Encode(kd.options.Topology.Rules(node, mapping))
 
-		// In any case, the writer is closed.
-		writer.Close()
+		stream.Close()
 
+		err = <-stream.E
 		if err != nil {
 			return err
 		}
@@ -381,7 +409,7 @@ func (kd *kubeEngine) writeCertificates(pod string, certs sim.Certificates) erro
 	}
 
 	for out, dst := range files {
-		r, err := kd.fs.Read(pod, ContainerRouterName, dst)
+		r, err := kd.kio.Read(pod, ContainerRouterName, dst)
 		if err != nil {
 			return err
 		}
@@ -394,8 +422,7 @@ func (kd *kubeEngine) writeCertificates(pod string, certs sim.Certificates) erro
 
 		defer f.Close()
 
-		br := bufio.NewReader(r)
-		_, err = br.WriteTo(f)
+		_, err = io.Copy(f, r)
 		if err != nil {
 			return err
 		}
@@ -554,7 +581,7 @@ func (kd *kubeEngine) StreamLogs(close <-chan struct{}) error {
 }
 
 func (kd *kubeEngine) ReadStats(pod string, start, end time.Time) (metrics.NodeStats, error) {
-	reader, err := kd.fs.Read(pod, ContainerMonitorName, MonitorDataFilepath)
+	reader, err := kd.kio.Read(pod, ContainerMonitorName, MonitorDataFilepath)
 	if err != nil {
 		return metrics.NodeStats{}, err
 	}
@@ -564,8 +591,59 @@ func (kd *kubeEngine) ReadStats(pod string, start, end time.Time) (metrics.NodeS
 	return ns, nil
 }
 
-func (kd *kubeEngine) ReadFile(pod, path string) (io.Reader, error) {
-	return kd.fs.Read(pod, ContainerAppName, path)
+func (kd *kubeEngine) findPodName(node string) string {
+	for _, pod := range kd.pods {
+		if pod.Labels[LabelNode] == node {
+			return pod.Name
+		}
+	}
+
+	return ""
+}
+
+// Read implements the IO interface to read a file from a node of the
+// simulation. It returns a reader with the content of the distant
+// file, or an error.
+func (kd *kubeEngine) Read(node, path string) (io.ReadCloser, error) {
+	return kd.kio.Read(kd.findPodName(node), ContainerAppName, path)
+}
+
+// Write implements the IO interface to write the content in a distant file
+// on the node.
+func (kd *kubeEngine) Write(node, path string, content io.Reader) error {
+	stream, err := kd.kio.Write(kd.findPodName(node), ContainerAppName, path)
+	if err != nil {
+		return fmt.Errorf("couldn't open stream: %w", err)
+	}
+
+	io.Copy(stream, content)
+	stream.Close()
+
+	err = <-stream.E
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Exec implements the IO interface to execute a command on a node. It returns
+// the output if the command is a success, or it returns the error.
+func (kd *kubeEngine) Exec(node string, cmd []string) ([]byte, error) {
+	stream, err := kd.kio.Exec(kd.findPodName(node), ContainerAppName, cmd)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't open stream: %w", err)
+	}
+
+	stream.Close()
+	out := <-stream.O
+
+	err = <-stream.E
+	if err != nil {
+		return out, err
+	}
+
+	return out, nil
 }
 
 func (kd *kubeEngine) String() string {
@@ -622,6 +700,7 @@ func makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
 					Labels: labels,
 				},
 				Spec: apiv1.PodSpec{
+					Hostname: node,
 					Containers: []apiv1.Container{
 						container,
 						{

@@ -160,7 +160,7 @@ func (s *Strategy) makeContext() (context.Context, error) {
 		files := make(sim.Files)
 
 		for i, pod := range s.pods {
-			reader, err := s.engine.ReadFile(pod.Name, fm.Path)
+			reader, err := s.engine.Read(pod.Labels[LabelNode], fm.Path)
 			if err != nil {
 				return nil, err
 			}
@@ -192,6 +192,13 @@ func (s *Strategy) Execute(round sim.Round) error {
 	defer close(closing)
 
 	err := s.engine.StreamLogs(closing)
+	if err != nil {
+		return err
+	}
+
+	// Run the configuration step.
+	// TODO: run this once per deployment.
+	err = round.Configure(s.engine)
 	if err != nil {
 		return err
 	}

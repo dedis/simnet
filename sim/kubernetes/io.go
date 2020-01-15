@@ -14,23 +14,43 @@ import (
 
 var newExecutor = remotecommand.NewSPDYExecutor
 
-type fs interface {
-	Read(string, string, string) (io.ReadCloser, error)
-	Write(string, string, []string) (io.WriteCloser, <-chan error, error)
+// Stream is the type returned by IO functions.
+type Stream struct {
+	writer io.WriteCloser
+	O      <-chan []byte
+	E      <-chan error
 }
 
-type kfs struct {
+func (s *Stream) Write(p []byte) (n int, err error) {
+	return s.writer.Write(p)
+}
+
+// Close closes the stream.
+func (s *Stream) Close() error {
+	return s.writer.Close()
+}
+
+// IO is the interface that provides primitives to readand write
+// in a given container's pod. It also provide a primitive to execute a
+// command.
+type IO interface {
+	Read(pod, container, path string) (io.ReadCloser, error)
+	Write(pod, container, path string) (*Stream, error)
+	Exec(pod, container string, cmd []string) (*Stream, error)
+}
+
+type kio struct {
 	restclient rest.Interface
 	namespace  string
 	config     *rest.Config
 }
 
-func (fs kfs) Read(pod, container, path string) (io.ReadCloser, error) {
+func (k kio) Read(pod, container, path string) (io.ReadCloser, error) {
 	reader, outStream := io.Pipe()
 
-	req := fs.restclient.
+	req := k.restclient.
 		Get().
-		Namespace(fs.namespace).
+		Namespace(k.namespace).
 		Resource("pods").
 		Name(pod).
 		SubResource("exec").
@@ -43,7 +63,7 @@ func (fs kfs) Read(pod, container, path string) (io.ReadCloser, error) {
 			TTY:       false,
 		}, scheme.ParameterCodec)
 
-	exec, err := newExecutor(fs.config, "POST", req.URL())
+	exec, err := newExecutor(k.config, "POST", req.URL())
 	if err != nil {
 		return nil, err
 	}
@@ -78,12 +98,23 @@ func (fs kfs) Read(pod, container, path string) (io.ReadCloser, error) {
 	return reader, nil
 }
 
-func (fs kfs) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan error, error) {
-	reader, writer := io.Pipe()
+func (k kio) Write(pod, container, path string) (*Stream, error) {
+	return k.Exec(pod, container, []string{"sh", "-c", fmt.Sprintf("cat - >> %s", path)})
+}
 
-	req := fs.restclient.
+func (k kio) Exec(pod, container string, cmd []string) (*Stream, error) {
+	reader, writer := io.Pipe()
+	errCh := make(chan error, 1)
+	outCh := make(chan []byte, 1)
+	stream := &Stream{
+		writer: writer,
+		O:      outCh,
+		E:      errCh,
+	}
+
+	req := k.restclient.
 		Post().
-		Namespace(fs.namespace).
+		Namespace(k.namespace).
 		Resource("pods").
 		Name(pod).
 		SubResource("exec").
@@ -91,32 +122,34 @@ func (fs kfs) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan
 			Container: container,
 			Command:   cmd,
 			Stdin:     true,
-			Stdout:    false,
+			Stdout:    true,
 			Stderr:    true,
 			TTY:       false,
 		}, scheme.ParameterCodec)
 
-	exec, err := newExecutor(fs.config, "POST", req.URL())
+	exec, err := newExecutor(k.config, "POST", req.URL())
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	done := make(chan error, 1)
 	errOut := new(bytes.Buffer)
+	out := new(bytes.Buffer)
 
 	go func() {
 		err = exec.Stream(remotecommand.StreamOptions{
 			Stdin:  reader,
+			Stdout: out,
 			Stderr: errOut,
 			Tty:    false,
 		})
 
 		if err != nil {
-			err = fmt.Errorf("%s: %s", err.Error(), errOut)
+			err = fmt.Errorf("%s: %s%s", err.Error(), errOut, out)
 		}
 
-		done <- err
+		outCh <- out.Bytes()
+		errCh <- err
 	}()
 
-	return writer, done, nil
+	return stream, nil
 }

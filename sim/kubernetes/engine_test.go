@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -170,6 +169,7 @@ func TestEngine_FetchPods(t *testing.T) {
 		},
 	}
 	engine := newKubeEngineTest(fake.NewSimpleClientset(list), "", 1)
+	engine.kio = newTestKIO()
 
 	pods, err := engine.FetchPods()
 	require.NoError(t, err)
@@ -178,7 +178,9 @@ func TestEngine_FetchPods(t *testing.T) {
 }
 
 func TestEngine_FetchPodsFailure(t *testing.T) {
+	kio := newTestKIO()
 	engine, client := makeEngine(1)
+	engine.kio = kio
 
 	_, err := engine.FetchPods()
 	require.Error(t, err)
@@ -191,6 +193,17 @@ func TestEngine_FetchPodsFailure(t *testing.T) {
 	_, err = engine.FetchPods()
 	require.Error(t, err)
 	require.Equal(t, e, err)
+
+	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
+		return true, &apiv1.PodList{Items: []apiv1.Pod{{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelID: AppID}}}}}, nil
+	})
+
+	e = errors.New("write error")
+	kio.err = e
+
+	_, err = engine.FetchPods()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
 }
 
 func TestEngine_UploadConfig(t *testing.T) {
@@ -205,26 +218,21 @@ func TestEngine_UploadConfig(t *testing.T) {
 		},
 	}
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		dec := json.NewDecoder(engine.fs.(*testFS).reader)
-
-		var rules []network.Rule
-		err := dec.Decode(&rules)
-		require.NoError(t, err)
-		require.Equal(t, 1, len(rules))
-	}()
-
 	err := engine.UploadConfig()
 	require.NoError(t, err)
 
-	wg.Wait()
+	dec := json.NewDecoder(engine.kio.(*testKIO).buffer)
+
+	var rules []network.Rule
+	err = dec.Decode(&rules)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(rules))
 }
 
 func TestEngine_UploadConfigFailures(t *testing.T) {
+	kio := newTestKIO()
 	engine, _ := makeEngine(1)
+	engine.kio = kio
 	engine.pods = []apiv1.Pod{
 		{
 			ObjectMeta: metav1.ObjectMeta{
@@ -236,18 +244,18 @@ func TestEngine_UploadConfigFailures(t *testing.T) {
 	}
 
 	e := errors.New("writing error")
-	engine.fs = &testFS{err: e}
+	kio.err = e
 
 	err := engine.UploadConfig()
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
-	_, writer := io.Pipe()
-	writer.Close()
-	engine.fs = &testFS{writer: writer}
+	e = errors.New("stream error")
+	kio.err = nil
+	kio.errStream = e
 	err = engine.UploadConfig()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "io: read/write on closed pipe")
+	require.Equal(t, err, e)
 }
 
 func TestEngine_DeployRouter(t *testing.T) {
@@ -414,7 +422,9 @@ func TestEngine_FetchCertificates(t *testing.T) {
 }
 
 func TestEngine_FetchCertificatesFailures(t *testing.T) {
+	kio := newTestKIO()
 	engine, client := makeEngine(0)
+	engine.kio = kio
 
 	e := errors.New("list error")
 	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
@@ -437,13 +447,15 @@ func TestEngine_FetchCertificatesFailures(t *testing.T) {
 		return true, &apiv1.PodList{Items: []apiv1.Pod{*makeRouterPod()}}, nil
 	})
 
-	engine.fs = &testFS{err: errors.New("oops")}
+	kio.err = errors.New("oops")
 	_, err = engine.FetchCertificates()
 	require.Error(t, err)
 }
 
 func TestEngine_WriteCertificatesFailures(t *testing.T) {
+	kio := newTestKIO()
 	engine, _ := makeEngine(0)
+	engine.kio = kio
 
 	err := engine.writeCertificates("", sim.Certificates{CA: "/", Key: "/", Cert: "/"})
 	require.Error(t, err)
@@ -459,7 +471,7 @@ func TestEngine_WriteCertificatesFailures(t *testing.T) {
 		Cert: filepath.Join(dir, "cert"),
 	}
 
-	engine.fs = &testFS{errRead: errors.New("oops")}
+	kio.errRead = errors.New("oops")
 	err = engine.writeCertificates("", certs)
 	require.Error(t, err)
 }
@@ -644,29 +656,89 @@ func TestEngine_StreamLogsFailures(t *testing.T) {
 }
 
 func TestEngine_ReadStats(t *testing.T) {
-	engine := &kubeEngine{
-		fs: &testFS{},
-	}
+	kio := newTestKIO()
+	engine := &kubeEngine{kio: kio}
 
 	stats, err := engine.ReadStats("pod-name", time.Now(), time.Now())
 	require.NoError(t, err)
 	require.NotNil(t, stats)
 
 	e := errors.New("oops")
-	engine.fs = &testFS{err: e}
+	kio.err = e
 	_, err = engine.ReadStats("pod-name", time.Now(), time.Now())
 	require.Error(t, err)
 	require.Equal(t, e, err)
 }
 
-func TestEngine_ReadFile(t *testing.T) {
-	engine := &kubeEngine{
-		fs: &testFS{},
-	}
+func TestEngine_Read(t *testing.T) {
+	engine := &kubeEngine{kio: newTestKIO()}
 
-	reader, err := engine.ReadFile("pod-name", "file-path")
+	reader, err := engine.Read("pod-name", "file-path")
 	require.NoError(t, err)
 	require.NotNil(t, reader)
+}
+
+func TestEngine_Write(t *testing.T) {
+	kio := newTestKIO()
+	engine := &kubeEngine{
+		kio: kio,
+	}
+
+	buffer := bytes.NewBufferString("abc")
+	err := engine.Write("", "", buffer)
+	require.NoError(t, err)
+
+	out, _ := ioutil.ReadAll(kio.buffer)
+	require.Equal(t, "abc", string(out))
+}
+
+func TestEngine_WriteFailures(t *testing.T) {
+	kio := newTestKIO()
+	engine := &kubeEngine{kio: kio}
+
+	e := errors.New("write error")
+	kio.err = e
+
+	err := engine.Write("", "", nil)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
+
+	e = errors.New("stream error")
+	kio.err = nil
+	kio.errStream = e
+
+	err = engine.Write("", "", new(bytes.Buffer))
+	require.Error(t, err)
+}
+
+func TestEngine_Exec(t *testing.T) {
+	engine := &kubeEngine{
+		kio: newTestKIO(),
+	}
+
+	out, err := engine.Exec("", []string{})
+	require.NoError(t, err)
+	require.NotNil(t, out)
+}
+
+func TestEngine_ExecFailures(t *testing.T) {
+	kio := newTestKIO()
+	engine := &kubeEngine{kio: kio}
+
+	e := errors.New("exec error")
+	kio.err = e
+
+	_, err := engine.Exec("", []string{})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
+
+	e = errors.New("stream error")
+	kio.err = nil
+	kio.errStream = e
+
+	_, err = engine.Exec("", []string{})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
 }
 
 func TestEngine_String(t *testing.T) {
@@ -679,8 +751,6 @@ func TestEngine_String(t *testing.T) {
 }
 
 func newKubeEngineTest(client kubernetes.Interface, ns string, n int) *kubeEngine {
-	r, w := io.Pipe()
-
 	return &kubeEngine{
 		config: &rest.Config{
 			Host: "https://127.0.0.1:333",
@@ -691,7 +761,7 @@ func newKubeEngineTest(client kubernetes.Interface, ns string, n int) *kubeEngin
 		options: &sim.Options{
 			Topology: network.NewSimpleTopology(n, 50*time.Millisecond),
 		},
-		fs: &testFS{reader: r, writer: w},
+		kio: newTestKIO(),
 	}
 }
 
@@ -711,25 +781,34 @@ func makeRouterPod() *apiv1.Pod {
 	}
 }
 
-type testFS struct {
-	err     error
-	errRead error
-	reader  io.ReadCloser
-	writer  io.WriteCloser
+type testKIO struct {
+	err       error
+	errRead   error
+	errStream error
+	buffer    *testBuffer
 }
 
-func (fs *testFS) Read(pod, container, path string) (io.ReadCloser, error) {
-	r, w := io.Pipe()
-	if fs.errRead != nil {
-		w.CloseWithError(fs.errRead)
-	} else {
-		w.Close()
-	}
-	return r, fs.err
+func newTestKIO() *testKIO {
+	return &testKIO{buffer: newTestBuffer()}
 }
 
-func (fs *testFS) Write(pod, container string, cmd []string) (io.WriteCloser, <-chan error, error) {
-	return fs.writer, nil, fs.err
+func (fs *testKIO) Read(pod, container, path string) (io.ReadCloser, error) {
+	fs.buffer.err = fs.errRead
+	return fs.buffer, fs.err
+}
+
+func (fs *testKIO) Write(pod, container, path string) (*Stream, error) {
+	errCh := make(chan error, 1)
+	errCh <- fs.errStream
+	return &Stream{writer: fs.buffer, E: errCh}, fs.err
+}
+
+func (fs *testKIO) Exec(pod, container string, cmd []string) (*Stream, error) {
+	errCh := make(chan error, 1)
+	errCh <- fs.errStream
+	outCh := make(chan []byte, 1)
+	outCh <- []byte{}
+	return &Stream{writer: fs.buffer, E: errCh, O: outCh}, fs.err
 }
 
 func setMockClient() {
@@ -796,4 +875,29 @@ func (pi fakePodInterface) GetLogs(string, *apiv1.PodLogOptions) *rest.Request {
 	}
 
 	return cl.Request()
+}
+
+type testBuffer struct {
+	*bytes.Buffer
+	err error
+}
+
+func newTestBuffer() *testBuffer {
+	return &testBuffer{Buffer: new(bytes.Buffer)}
+}
+
+func (b *testBuffer) Read(p []byte) (int, error) {
+	if b.err != nil {
+		return 0, b.err
+	}
+
+	return b.Buffer.Read(p)
+}
+
+func (b *testBuffer) WriteTo(io.Writer) (int64, error) {
+	return 0, b.err
+}
+
+func (b *testBuffer) Close() error {
+	return nil
 }

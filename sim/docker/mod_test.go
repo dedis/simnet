@@ -286,6 +286,10 @@ type testRound struct {
 	ctx context.Context
 }
 
+func (r *testRound) Configure(sio sim.IO) error {
+	return nil
+}
+
 func (r *testRound) Execute(ctx context.Context) error {
 	r.ctx = ctx
 	return r.err
