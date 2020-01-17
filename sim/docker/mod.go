@@ -340,7 +340,7 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 }
 
 // Deploy pulls the application image and starts a container per node.
-func (s *Strategy) Deploy() error {
+func (s *Strategy) Deploy(round sim.Round) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

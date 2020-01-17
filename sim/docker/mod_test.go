@@ -51,7 +51,7 @@ func TestStrategy_Deploy(t *testing.T) {
 	enc := json.NewEncoder(client.bufferPullImage)
 	require.NoError(t, enc.Encode(&Event{Status: "Test"}))
 
-	err := s.Deploy()
+	err := s.Deploy(&testRound{})
 	require.NoError(t, err)
 
 	// Check that application and monitor images are pulled.
@@ -143,7 +143,7 @@ func TestStrategy_PullImageFailures(t *testing.T) {
 	e := errors.New("pull image error")
 	client.errImagePull = e
 
-	err := s.Deploy()
+	err := s.Deploy(&testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
@@ -176,7 +176,7 @@ func TestStrategy_CreateContainerFailures(t *testing.T) {
 	e := errors.New("create container error")
 	client.errContainerCreate = e
 
-	err := s.Deploy()
+	err := s.Deploy(&testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
@@ -184,7 +184,7 @@ func TestStrategy_CreateContainerFailures(t *testing.T) {
 	client.resetErrors()
 	client.errContainerStart = e
 
-	err = s.Deploy()
+	err = s.Deploy(&testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
@@ -192,7 +192,7 @@ func TestStrategy_CreateContainerFailures(t *testing.T) {
 	client.resetErrors()
 	client.errContainerList = e
 
-	err = s.Deploy()
+	err = s.Deploy(&testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e), err.Error())
 }
@@ -254,7 +254,7 @@ func TestStrategy_ConfigureContainersFailures(t *testing.T) {
 	client.resetErrors()
 	client.errEvent = e
 
-	err = s.Deploy()
+	err = s.Deploy(&testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e), err.Error())
 }

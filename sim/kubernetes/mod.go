@@ -93,7 +93,7 @@ func NewStrategy(cfg string, opts ...sim.Option) (*Strategy, error) {
 
 // Deploy will create a deployment on the Kubernetes cluster. A pod will then
 // be assigned to simulation nodes.
-func (s *Strategy) Deploy() error {
+func (s *Strategy) Deploy(round sim.Round) error {
 	w, err := s.engine.CreateDeployment()
 	if err != nil {
 		return err
@@ -138,6 +138,12 @@ func (s *Strategy) Deploy() error {
 		sim.WithHost(host),
 		sim.WithCertificate(certificates),
 	)
+	if err != nil {
+		return err
+	}
+
+	// Run the configuration step.
+	err = round.Configure(s.engine)
 	if err != nil {
 		return err
 	}
@@ -192,13 +198,6 @@ func (s *Strategy) Execute(round sim.Round) error {
 	defer close(closing)
 
 	err := s.engine.StreamLogs(closing)
-	if err != nil {
-		return err
-	}
-
-	// Run the configuration step.
-	// TODO: run this once per deployment.
-	err = round.Configure(s.engine)
 	if err != nil {
 		return err
 	}

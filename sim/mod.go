@@ -45,7 +45,7 @@ type Strategy interface {
 	// Deploy takes care of deploying the application according to the
 	// topology. The simulation should be able to run after it returns
 	// with no error.
-	Deploy() error
+	Deploy(Round) error
 
 	// Execute takes the round provided to execute a round of the simulation.
 	Execute(Round) error

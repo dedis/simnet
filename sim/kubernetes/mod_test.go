@@ -86,50 +86,55 @@ func TestStrategy_DeployWithFailures(t *testing.T) {
 		tun:     testTunnel{},
 	}
 
-	err := stry.Deploy()
+	err := stry.Deploy(testRound{})
 	require.NoError(t, err)
 
 	// Errors are tested in reverse order to avoid to reset err fields
 	// all the time.
 
-	e := errors.New("tunnel start error")
+	e := errors.New("configuration error")
+	err = stry.Deploy(testRound{errCfg: e})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
+
+	e = errors.New("tunnel start error")
 	stry.tun = testTunnel{err: e}
-	err = stry.Deploy()
+	err = stry.Deploy(testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("fetch router error")
 	deployer.errFetchCerts = e
-	err = stry.Deploy()
+	err = stry.Deploy(testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("wait router error")
 	deployer.errWaitRouter = e
-	err = stry.Deploy()
+	err = stry.Deploy(testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("deploy router error")
 	deployer.errDeployRouter = e
-	err = stry.Deploy()
+	err = stry.Deploy(testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("upload config error")
 	deployer.errUploadConfig = e
-	err = stry.Deploy()
+	err = stry.Deploy(testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("fetch pods error")
 	deployer.errFetchPods = e
-	err = stry.Deploy()
+	err = stry.Deploy(testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("wait deployment error")
 	deployer.errWaitDeployment = e
-	err = stry.Deploy()
+	err = stry.Deploy(testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("create deployment error")
 	deployer.errDeployment = e
-	err = stry.Deploy()
+	err = stry.Deploy(testRound{})
 	require.Equal(t, e, err)
 }
 
@@ -216,11 +221,6 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 	stry.options = sim.NewOptions([]sim.Option{})
 	e = errors.New("round error")
 	err = stry.Execute(testRound{err: e})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
-
-	e = errors.New("configuration error")
-	err = stry.Execute(testRound{errCfg: e})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 }

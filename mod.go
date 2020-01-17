@@ -63,7 +63,7 @@ func (s *Simulation) Run(args []string) error {
 	}
 
 	if doDeploy || doAll {
-		err := s.strategy.Deploy()
+		err := s.strategy.Deploy(s.round)
 		if err != nil {
 			return err
 		}
