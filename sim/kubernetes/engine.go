@@ -261,13 +261,14 @@ func (kd *kubeEngine) configureContainer(pods []apiv1.Pod) error {
 		buffer.WriteString(fmt.Sprintf("%s\t%s\n", pod.Status.PodIP, pod.Labels[LabelNode]))
 	}
 
-	for _, pod := range pods {
-		fmt.Fprintf(kd.writer, "Configuring pod %s\n", pod.Name)
+	for i, pod := range pods {
+		fmt.Fprintf(kd.writer, goterm.ResetLine("Configuring pod [%d/%d]"), i+1, len(pods))
 		err := kd.Write(pod.Labels[LabelNode], "/etc/hosts", bytes.NewBuffer(buffer.Bytes()))
 		if err != nil {
 			return err
 		}
 	}
+	fmt.Println("")
 
 	return nil
 }
