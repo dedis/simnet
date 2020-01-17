@@ -1,7 +1,6 @@
 package docker
 
 import (
-	"archive/tar"
 	"context"
 	"encoding/json"
 	"errors"
@@ -79,6 +78,7 @@ var makeDockerClient = func() (client.APIClient, error) {
 type Strategy struct {
 	out        io.Writer
 	cli        client.APIClient
+	dio        sim.IO
 	options    *sim.Options
 	containers []types.Container
 	stats      *metrics.Stats
@@ -100,6 +100,7 @@ func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 	return &Strategy{
 		out:        os.Stdout,
 		cli:        cli,
+		dio:        dockerio{cli: cli},
 		options:    sim.NewOptions(opts),
 		containers: make([]types.Container, 0),
 		stats: &metrics.Stats{
@@ -181,20 +182,21 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 		ports[nat.Port(key)] = struct{}{}
 	}
 
-	cfg := &container.Config{
-		Image: s.options.Image,
-		Cmd:   append(append([]string{}, s.options.Cmd...), s.options.Args...),
-		Labels: map[string]string{
-			ContainerLabelKey: ContainerLabelValue,
-		},
-		ExposedPorts: ports,
-	}
-
 	hcfg := &container.HostConfig{
 		AutoRemove: true,
 	}
 
 	for _, node := range s.options.Topology.GetNodes() {
+		cfg := &container.Config{
+			Image: s.options.Image,
+			Cmd:   append(append([]string{}, s.options.Cmd...), s.options.Args...),
+			Labels: map[string]string{
+				ContainerLabelKey: ContainerLabelValue,
+			},
+			ExposedPorts: ports,
+			Hostname:     node.String(),
+		}
+
 		resp, err := s.cli.ContainerCreate(ctx, cfg, hcfg, nil, node.String())
 		if err != nil {
 			return err
@@ -362,6 +364,11 @@ func (s *Strategy) Deploy(round sim.Round) error {
 		return fmt.Errorf("couldn't configure the containers: %w", err)
 	}
 
+	err = round.Configure(s.dio)
+	if err != nil {
+		return err
+	}
+
 	fmt.Fprintln(s.out, "Deployment... Done.")
 	s.updated = true // All states are loaded at that point.
 
@@ -386,15 +393,9 @@ func (s *Strategy) makeExecutionContext() (context.Context, error) {
 		files := make(sim.Files)
 
 		for i, container := range s.containers {
-			reader, _, err := s.cli.CopyFromContainer(ctx, container.ID, fm.Path)
+			reader, err := s.dio.Read(container.ID, fm.Path)
 			if err != nil {
 				return nil, fmt.Errorf("couldn't copy file: %w", err)
-			}
-
-			tr := tar.NewReader(reader)
-			_, err = tr.Next()
-			if err != nil {
-				return nil, fmt.Errorf("couldn't untar: %w", err)
 			}
 
 			ident := sim.Identifier{
@@ -403,12 +404,10 @@ func (s *Strategy) makeExecutionContext() (context.Context, error) {
 				IP:    container.NetworkSettings.Networks[DefaultContainerNetwork].IPAddress,
 			}
 
-			files[ident], err = fm.Mapper(tr)
+			files[ident], err = fm.Mapper(reader)
 			if err != nil {
 				return nil, fmt.Errorf("mapper failed: %w", err)
 			}
-
-			reader.Close()
 		}
 
 		ctx = context.WithValue(ctx, key, files)
@@ -493,7 +492,7 @@ func (s *Strategy) Execute(round sim.Round) error {
 	s.stats.Timestamp = time.Now().Unix()
 	s.statsLock.Unlock()
 
-	err = round.Execute(ctx, nil)
+	err = round.Execute(ctx, s.dio)
 	if err != nil {
 		return fmt.Errorf("couldn't execute: %w", err)
 	}

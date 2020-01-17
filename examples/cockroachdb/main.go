@@ -86,7 +86,7 @@ func main() {
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
 	engine, err := kubernetes.NewStrategy(kubeconfig, options...)
-	// engine, err := docker.NewStrategy(options...)
+	//engine, err := docker.NewStrategy(options...)
 	if err != nil {
 		panic(err)
 	}

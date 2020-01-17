@@ -1,7 +1,6 @@
 package docker
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -133,6 +132,16 @@ func TestStrategy_Deploy(t *testing.T) {
 
 	// Check that the states are marked as updated.
 	require.True(t, s.updated)
+}
+
+func TestStrategy_RoundConfigureFailure(t *testing.T) {
+	s, clean := newTestStrategy(t)
+	defer clean()
+
+	e := errors.New("configure error")
+	err := s.Deploy(&testRound{err: e})
+	require.Error(t, err)
+	require.Equal(t, err, e)
 }
 
 func TestStrategy_PullImageFailures(t *testing.T) {
@@ -287,7 +296,7 @@ type testRound struct {
 }
 
 func (r *testRound) Configure(simio sim.IO) error {
-	return nil
+	return r.err
 }
 
 func (r *testRound) Execute(ctx context.Context, simio sim.IO) error {
@@ -361,20 +370,14 @@ func TestStrategy_MakeContextFailures(t *testing.T) {
 	s.containers = []types.Container{makeTestContainer("id:node0")}
 
 	e := errors.New("copy file error")
-	client.errCopyFromContainer = e
+	s.dio = testDockerIO{err: e}
 
 	err := s.Execute(&testRound{})
 	require.Error(t, err)
-	require.True(t, errors.Is(err, e), err.Error())
+	require.EqualError(t, errors.Unwrap(errors.Unwrap(err)), e.Error())
 
 	client.resetErrors()
-	client.errCopyReader = true
-
-	err = s.Execute(&testRound{})
-	require.Error(t, err)
-	require.EqualError(t, errors.Unwrap(errors.Unwrap(err)), "io: read/write on closed pipe")
-
-	client.resetErrors()
+	s.dio = testDockerIO{}
 	e = errors.New("mapper error")
 	s.options.Files[sim.FilesKey("error")] = sim.FileMapper{
 		Path: "",
@@ -593,18 +596,15 @@ type testClient struct {
 	bufferPullImage *bytes.Buffer
 
 	// Don't forget to update the reset function when adding new errors.
-	errImagePull         error
-	errContainerCreate   error
-	errContainerAttach   error
-	errContainerStart    error
-	errContainerStop     error
-	errContainerList     error
-	errContainerStats    error
-	errCopyFromContainer error
-	errAttachConn        error
-	errEvent             error
-
-	errCopyReader bool
+	errImagePull       error
+	errContainerCreate error
+	errContainerAttach error
+	errContainerStart  error
+	errContainerStop   error
+	errContainerList   error
+	errContainerStats  error
+	errAttachConn      error
+	errEvent           error
 }
 
 func (c *testClient) resetErrors() {
@@ -616,10 +616,8 @@ func (c *testClient) resetErrors() {
 	c.errContainerStop = nil
 	c.errContainerList = nil
 	c.errContainerStats = nil
-	c.errCopyFromContainer = nil
 	c.errAttachConn = nil
 	c.errEvent = nil
-	c.errCopyReader = false
 }
 
 func (c *testClient) ClientVersion() string {
@@ -713,26 +711,6 @@ func (c *testClient) ContainerStop(ctx context.Context, id string, t *time.Durat
 	return c.errContainerStop
 }
 
-func (c *testClient) CopyFromContainer(context.Context, string, string) (io.ReadCloser, types.ContainerPathStat, error) {
-	if c.errCopyReader {
-		r, _ := io.Pipe()
-		r.Close()
-		return r, types.ContainerPathStat{}, nil
-	}
-
-	reader, writer := io.Pipe()
-	tw := tar.NewWriter(writer)
-
-	go func() {
-		content := "test"
-		tw.WriteHeader(&tar.Header{Name: "abc", Mode: 0600, Size: int64(len(content))})
-		tw.Write([]byte(content))
-		tw.Close()
-	}()
-
-	return reader, types.ContainerPathStat{}, c.errCopyFromContainer
-}
-
 func (c *testClient) Events(ctx context.Context, options types.EventsOptions) (<-chan events.Message, <-chan error) {
 	c.callsEvents = append(c.callsEvents, testCallEvents{ctx, options})
 
@@ -758,6 +736,22 @@ func (c *testClient) Events(ctx context.Context, options types.EventsOptions) (<
 	return ch, nil
 }
 
+type testDockerIO struct {
+	err error
+}
+
+func (dio testDockerIO) Read(container, path string) (io.ReadCloser, error) {
+	return nil, dio.err
+}
+
+func (dio testDockerIO) Write(container, path string, content io.Reader) error {
+	return nil
+}
+
+func (dio testDockerIO) Exec(container string, cmd []string, options sim.ExecOptions) error {
+	return nil
+}
+
 const (
 	testImage         = "path/to/image"
 	testStatBaseValue = uint64(123)
@@ -776,8 +770,11 @@ func newTestStrategy(t *testing.T) (*Strategy, func()) {
 		os.RemoveAll(out)
 	}
 
+	client := &testClient{numContainers: 3}
+
 	return &Strategy{
-		cli: &testClient{numContainers: 3},
+		cli: client,
+		dio: testDockerIO{},
 		out: ioutil.Discard,
 		options: sim.NewOptions([]sim.Option{
 			sim.WithOutput(out),
