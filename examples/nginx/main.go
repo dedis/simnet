@@ -16,7 +16,11 @@ import (
 
 type simRound struct{}
 
-func (s simRound) Execute(ctx context.Context) error {
+func (s simRound) Configure(simio sim.IO) error {
+	return nil
+}
+
+func (s simRound) Execute(ctx context.Context, simio sim.IO) error {
 	nodes := ctx.Value(sim.NodeInfoKey{}).([]sim.NodeInfo)
 	fmt.Printf("Nodes: %v\n", nodes)
 
@@ -44,12 +48,7 @@ func main() {
 		sim.WithTopology(
 			network.NewSimpleTopology(3, 25),
 		),
-		sim.WithImage(
-			"nginx", // DockerHub image
-			nil,     // CMD if needed
-			nil,     // ARGS if needed
-			sim.NewTCP(80),
-		),
+		sim.WithImage("nginx", nil, nil, sim.NewTCP(80)),
 	}
 
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")

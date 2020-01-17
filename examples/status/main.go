@@ -20,10 +20,14 @@ import (
 
 // StatusSimulationRound contacts each node of the simulation network and asks
 // them for their status.
-type StatusSimulationRound struct{}
+type statusSimulationRound struct{}
+
+func (r statusSimulationRound) Configure(simio sim.IO) error {
+	return nil
+}
 
 // Execute will contact each known node and ask for its status.
-func (r StatusSimulationRound) Execute(ctx context.Context) error {
+func (r statusSimulationRound) Execute(ctx context.Context, simio sim.IO) error {
 	files := ctx.Value(sim.FilesKey("private.toml")).(sim.Files)
 	idents := make([]*network.ServerIdentity, len(files))
 
@@ -93,7 +97,7 @@ func main() {
 		panic(err)
 	}
 
-	sim := simnet.NewSimulation(StatusSimulationRound{}, engine)
+	sim := simnet.NewSimulation(statusSimulationRound{}, engine)
 
 	err = sim.Run(os.Args)
 	if err != nil {

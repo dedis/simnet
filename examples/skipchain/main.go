@@ -22,7 +22,11 @@ import (
 
 type skipchainSimulationRound struct{}
 
-func (r skipchainSimulationRound) Execute(ctx context.Context) error {
+func (r skipchainSimulationRound) Configure(simio sim.IO) error {
+	return nil
+}
+
+func (r skipchainSimulationRound) Execute(ctx context.Context, simio sim.IO) error {
 	files := ctx.Value(sim.FilesKey("private.toml")).(sim.Files)
 	idents := make([]*network.ServerIdentity, len(files))
 
