@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"go.dedis.ch/simnet"
 	"go.dedis.ch/simnet/network"
@@ -13,26 +13,58 @@ import (
 	"go.dedis.ch/simnet/sim/kubernetes"
 )
 
+var (
+	commandInit         = []string{"./cockroach", "init", "--insecure"}
+	commandWorkloadInit = []string{"./cockroach", "workload", "init", "movr", "postgresql://root@node0:26257?sslmode=disable"}
+	commandWorkloadRun  = []string{"./cockroach", "workload", "run", "movr", "--duration=10s", "postgresql://root@node0:26257?sslmode=disable"}
+)
+
 type simRound struct{}
 
-func (s simRound) Configure(sio sim.IO) error {
+func (s simRound) Configure(simio sim.IO) error {
+	reader, writer := io.Pipe()
+
+	go io.Copy(os.Stdout, reader)
+
 	// Initialise the cluster.
-	out, err := sio.Exec("node0", []string{"./cockroach", "init", "--insecure"})
+	err := simio.Exec("node0", commandInit, sim.ExecOptions{
+		Stdout: writer,
+		Stderr: writer,
+	})
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(string(out))
-
-	fmt.Println("Sleeping 5s")
-	time.Sleep(5 * time.Second)
-
 	return nil
 }
 
-func (s simRound) Execute(ctx context.Context) error {
+func (s simRound) Execute(ctx context.Context, simio sim.IO) error {
 	nodes := ctx.Value(sim.NodeInfoKey{}).([]sim.NodeInfo)
 	fmt.Printf("Nodes: %v\n", nodes)
+
+	reader, writer := io.Pipe()
+
+	go io.Copy(os.Stdout, reader)
+
+	err := simio.Exec("node0", commandWorkloadInit, sim.ExecOptions{
+		Stdout: writer,
+		Stderr: writer,
+	})
+	if err != nil {
+		return err
+	}
+
+	err = simio.Exec("node0", commandWorkloadRun, sim.ExecOptions{
+		Stdout: writer,
+		Stderr: writer,
+	})
+	if err != nil {
+		return err
+	}
+
+	// In order to clean the Go routine, it's important to close one side of
+	// the pipe.
+	writer.Close()
 
 	return nil
 }

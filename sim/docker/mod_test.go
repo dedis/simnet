@@ -286,11 +286,11 @@ type testRound struct {
 	ctx context.Context
 }
 
-func (r *testRound) Configure(sio sim.IO) error {
+func (r *testRound) Configure(simio sim.IO) error {
 	return nil
 }
 
-func (r *testRound) Execute(ctx context.Context) error {
+func (r *testRound) Execute(ctx context.Context, simio sim.IO) error {
 	r.ctx = ctx
 	return r.err
 }

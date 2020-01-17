@@ -5,6 +5,12 @@ import (
 	"io"
 )
 
+type ExecOptions struct {
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
 // IO provides an API to interact with the nodes.
 type IO interface {
 	// Read reads a file on a simulation node at the given path. It returns a
@@ -18,18 +24,18 @@ type IO interface {
 
 	// Exec executes a command on a simulation node and returns the output if
 	// the command is successful, an error otherwise.
-	Exec(node string, cmd []string) ([]byte, error)
+	Exec(node string, cmd []string, options ExecOptions) error
 }
 
 // Round is executed during the simulation.
 type Round interface {
 	// Configure is run before Execute so that initialization can be performed
 	// before the simulation is executed.
-	Configure(sio IO) error
+	Configure(simio IO) error
 
 	// Execute is run during the execution step of the simulation, which is
 	// after the nodes are deployed.
-	Execute(ctx context.Context) error
+	Execute(ctx context.Context, simio IO) error
 }
 
 // Strategy provides the primitives to run a simulation from the

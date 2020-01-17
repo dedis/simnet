@@ -65,16 +65,11 @@ func TestIO_Write(t *testing.T) {
 		restclient: &restfake.RESTClient{},
 	}
 
-	stream, err := fs.Write("", "", "")
-	require.NoError(t, err)
-	require.NotNil(t, stream)
+	content := bytes.NewBufferString("deadbeef")
 
-	content := []byte("deadbeef")
-	stream.Write(content)
-	stream.Close()
-	err = <-stream.E
+	err := fs.Write("", "", "", bytes.NewBuffer(content.Bytes()))
 	require.NoError(t, err)
-	require.Equal(t, content, out.Bytes())
+	require.Equal(t, content.String(), out.String())
 }
 
 func TestIO_WriteFailure(t *testing.T) {
@@ -87,20 +82,13 @@ func TestIO_WriteFailure(t *testing.T) {
 		restclient: &restfake.RESTClient{},
 	}
 
-	_, err := fs.Write("", "", "")
+	err := fs.Write("", "", "", nil)
 	require.Error(t, err)
 	require.Equal(t, e, err)
+}
 
-	newExecutor = func(cfg *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
-		return testFailingExecutorFactory(u)
-	}
-
-	stream, err := fs.Write("", "", "")
-	require.NoError(t, err)
-
-	err = <-stream.E
-	require.Error(t, err)
-	require.Equal(t, "command failed: stream error", err.Error())
+func TestExec(t *testing.T) {
+	// TODO:
 }
 
 type fakeExecutor struct {

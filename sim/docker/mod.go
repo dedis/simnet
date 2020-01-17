@@ -493,7 +493,7 @@ func (s *Strategy) Execute(round sim.Round) error {
 	s.stats.Timestamp = time.Now().Unix()
 	s.statsLock.Unlock()
 
-	err = round.Execute(ctx)
+	err = round.Execute(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("couldn't execute: %w", err)
 	}

@@ -242,20 +242,10 @@ func TestEngine_UploadConfigFailures(t *testing.T) {
 			},
 		},
 	}
-
-	e := errors.New("writing error")
-	kio.err = e
+	engine.makeEncoder = newBadEncoder
 
 	err := engine.UploadConfig()
 	require.Error(t, err)
-	require.Equal(t, e, err)
-
-	e = errors.New("stream error")
-	kio.err = nil
-	kio.errStream = e
-	err = engine.UploadConfig()
-	require.Error(t, err)
-	require.Equal(t, err, e)
 }
 
 func TestEngine_DeployRouter(t *testing.T) {
@@ -680,9 +670,7 @@ func TestEngine_Read(t *testing.T) {
 
 func TestEngine_Write(t *testing.T) {
 	kio := newTestKIO()
-	engine := &kubeEngine{
-		kio: kio,
-	}
+	engine := &kubeEngine{kio: kio}
 
 	buffer := bytes.NewBufferString("abc")
 	err := engine.Write("", "", buffer)
@@ -699,26 +687,32 @@ func TestEngine_WriteFailures(t *testing.T) {
 	e := errors.New("write error")
 	kio.err = e
 
-	err := engine.Write("", "", nil)
+	err := engine.Write("", "", new(bytes.Buffer))
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
-	e = errors.New("stream error")
+	// Stream error..
 	kio.err = nil
-	kio.errStream = e
-
-	err = engine.Write("", "", new(bytes.Buffer))
+	r, _ := io.Pipe()
+	r.Close()
+	err = engine.Write("", "", r)
 	require.Error(t, err)
+	require.EqualError(t, errors.Unwrap(err), "io: read/write on closed pipe")
 }
 
 func TestEngine_Exec(t *testing.T) {
-	engine := &kubeEngine{
-		kio: newTestKIO(),
-	}
+	kio := newTestKIO()
+	engine := &kubeEngine{kio: kio}
+	kio.bout = bytes.NewBufferString("output example")
+	kio.berr = bytes.NewBufferString("error example")
 
-	out, err := engine.Exec("", []string{})
+	bout := new(bytes.Buffer)
+	berr := new(bytes.Buffer)
+
+	err := engine.Exec("", []string{}, sim.ExecOptions{Stdout: bout, Stderr: berr})
 	require.NoError(t, err)
-	require.NotNil(t, out)
+	require.Equal(t, "output example", bout.String())
+	require.Equal(t, "error example", berr.String())
 }
 
 func TestEngine_ExecFailures(t *testing.T) {
@@ -728,15 +722,7 @@ func TestEngine_ExecFailures(t *testing.T) {
 	e := errors.New("exec error")
 	kio.err = e
 
-	_, err := engine.Exec("", []string{})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
-
-	e = errors.New("stream error")
-	kio.err = nil
-	kio.errStream = e
-
-	_, err = engine.Exec("", []string{})
+	err := engine.Exec("", []string{}, sim.ExecOptions{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 }
@@ -761,7 +747,8 @@ func newKubeEngineTest(client kubernetes.Interface, ns string, n int) *kubeEngin
 		options: &sim.Options{
 			Topology: network.NewSimpleTopology(n, 50*time.Millisecond),
 		},
-		kio: newTestKIO(),
+		kio:         newTestKIO(),
+		makeEncoder: makeJSONEncoder,
 	}
 }
 
@@ -782,33 +769,50 @@ func makeRouterPod() *apiv1.Pod {
 }
 
 type testKIO struct {
-	err       error
-	errRead   error
-	errStream error
-	buffer    *testBuffer
+	err     error
+	errRead error
+	buffer  *bytes.Buffer
+	bout    *bytes.Buffer
+	berr    *bytes.Buffer
 }
 
 func newTestKIO() *testKIO {
-	return &testKIO{buffer: newTestBuffer()}
+	return &testKIO{buffer: new(bytes.Buffer)}
 }
 
 func (fs *testKIO) Read(pod, container, path string) (io.ReadCloser, error) {
-	fs.buffer.err = fs.errRead
-	return fs.buffer, fs.err
+	if fs.errRead != nil {
+		r, _ := io.Pipe()
+		r.CloseWithError(fs.errRead)
+		return r, nil
+	}
+
+	return ioutil.NopCloser(fs.buffer), fs.err
 }
 
-func (fs *testKIO) Write(pod, container, path string) (*Stream, error) {
-	errCh := make(chan error, 1)
-	errCh <- fs.errStream
-	return &Stream{writer: fs.buffer, E: errCh}, fs.err
+func (fs *testKIO) Write(pod, container, path string, content io.Reader) error {
+	if _, err := io.Copy(fs.buffer, content); err != nil {
+		return err
+	}
+	return fs.err
 }
 
-func (fs *testKIO) Exec(pod, container string, cmd []string) (*Stream, error) {
-	errCh := make(chan error, 1)
-	errCh <- fs.errStream
-	outCh := make(chan []byte, 1)
-	outCh <- []byte{}
-	return &Stream{writer: fs.buffer, E: errCh, O: outCh}, fs.err
+func (fs *testKIO) Exec(pod, container string, cmd []string, options sim.ExecOptions) error {
+	if options.Stdin != nil {
+		if _, err := io.Copy(fs.buffer, options.Stdin); err != nil {
+			return err
+		}
+	}
+
+	if options.Stdout != nil {
+		io.Copy(options.Stdout, fs.bout)
+	}
+
+	if options.Stderr != nil {
+		io.Copy(options.Stderr, fs.berr)
+	}
+
+	return fs.err
 }
 
 func setMockClient() {
@@ -875,29 +879,4 @@ func (pi fakePodInterface) GetLogs(string, *apiv1.PodLogOptions) *rest.Request {
 	}
 
 	return cl.Request()
-}
-
-type testBuffer struct {
-	*bytes.Buffer
-	err error
-}
-
-func newTestBuffer() *testBuffer {
-	return &testBuffer{Buffer: new(bytes.Buffer)}
-}
-
-func (b *testBuffer) Read(p []byte) (int, error) {
-	if b.err != nil {
-		return 0, b.err
-	}
-
-	return b.Buffer.Read(p)
-}
-
-func (b *testBuffer) WriteTo(io.Writer) (int64, error) {
-	return 0, b.err
-}
-
-func (b *testBuffer) Close() error {
-	return nil
 }

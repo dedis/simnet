@@ -13,11 +13,11 @@ import (
 
 type testRound struct{}
 
-func (t testRound) Configure(sio sim.IO) error {
+func (t testRound) Configure(simio sim.IO) error {
 	return nil
 }
 
-func (t testRound) Execute(ctx context.Context) error {
+func (t testRound) Execute(ctx context.Context, simio sim.IO) error {
 	return nil
 }
 

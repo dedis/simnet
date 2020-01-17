@@ -2,7 +2,6 @@ package kubernetes
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -86,19 +85,23 @@ var (
 	DeamonLimitCPU = resource.MustParse("50m")
 	// AppRequestMemory is the amount of memory allocated to app containers in the
 	// simulation pods.
-	AppRequestMemory = resource.MustParse("32Mi")
+	AppRequestMemory = resource.MustParse("256Mi")
 	// AppRequestCPU is the number of CPU allocated to app containers in the
 	// simulation pods.
 	AppRequestCPU = resource.MustParse("50m")
 	// AppLimitMemory is the maximum amount of memory allocated to app containers in the
 	// simulation pods.
-	AppLimitMemory = resource.MustParse("128Mi")
+	AppLimitMemory = resource.MustParse("256Mi")
 	// AppLimitCPU is the maximum number of CPU allocated to app containers in the
 	// simulation pods.
 	AppLimitCPU = resource.MustParse("200m")
 )
 
 var newClient = kubernetes.NewForConfig
+
+var (
+	commandNetEm = []string{"sh", "-c", "./netem -log /proc/1/fd/1 -"}
+)
 
 type engine interface {
 	CreateDeployment() (watch.Interface, error)
@@ -114,19 +117,20 @@ type engine interface {
 	ReadStats(pod string, start, end time.Time) (metrics.NodeStats, error)
 	Read(pod, path string) (io.ReadCloser, error)
 	Write(node, path string, content io.Reader) error
-	Exec(node string, cmd []string) ([]byte, error)
+	Exec(node string, cmd []string, options sim.ExecOptions) error
 }
 
 type kubeEngine struct {
-	writer    io.Writer
-	options   *sim.Options
-	host      string
-	namespace string
-	config    *rest.Config
-	client    kubernetes.Interface
-	kio       IO
-	pods      []apiv1.Pod
-	wgLogs    sync.WaitGroup
+	writer      io.Writer
+	options     *sim.Options
+	host        string
+	namespace   string
+	config      *rest.Config
+	client      kubernetes.Interface
+	kio         IO
+	pods        []apiv1.Pod
+	wgLogs      sync.WaitGroup
+	makeEncoder func(io.Writer) Encoder
 }
 
 func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeEngine, error) {
@@ -152,6 +156,7 @@ func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeE
 			namespace:  ns,
 			config:     config,
 		},
+		makeEncoder: makeJSONEncoder,
 	}, nil
 }
 
@@ -304,21 +309,25 @@ func (kd *kubeEngine) UploadConfig() error {
 	}
 
 	for _, pod := range kd.pods {
+		reader, writer := io.Pipe()
+
+		go func() {
+			node := network.Node(pod.Labels[LabelNode])
+
+			enc := kd.makeEncoder(writer)
+			err := enc.Encode(kd.options.Topology.Rules(node, mapping))
+			if err != nil {
+				writer.CloseWithError(err)
+			} else {
+				writer.Close()
+			}
+		}()
+
 		// Logs are written in the stdout of the main process so we get the
 		// logs from the Kubernetes drivers.
-		stream, err := kd.kio.Exec(pod.Name, ContainerMonitorName, []string{"sh", "-c", "./netem -log /proc/1/fd/1 -"})
-		if err != nil {
-			return err
-		}
-
-		node := network.Node(pod.Labels[LabelNode])
-
-		enc := json.NewEncoder(stream)
-		enc.Encode(kd.options.Topology.Rules(node, mapping))
-
-		stream.Close()
-
-		err = <-stream.E
+		err := kd.kio.Exec(pod.Name, ContainerMonitorName, commandNetEm, sim.ExecOptions{
+			Stdin: reader,
+		})
 		if err != nil {
 			return err
 		}
@@ -611,17 +620,20 @@ func (kd *kubeEngine) Read(node, path string) (io.ReadCloser, error) {
 // Write implements the IO interface to write the content in a distant file
 // on the node.
 func (kd *kubeEngine) Write(node, path string, content io.Reader) error {
-	stream, err := kd.kio.Write(kd.findPodName(node), ContainerAppName, path)
+	reader, writer := io.Pipe()
+
+	go func() {
+		_, err := io.Copy(writer, content)
+		if err != nil {
+			writer.CloseWithError(err)
+		} else {
+			writer.Close()
+		}
+	}()
+
+	err := kd.kio.Write(kd.findPodName(node), ContainerAppName, path, reader)
 	if err != nil {
 		return fmt.Errorf("couldn't open stream: %w", err)
-	}
-
-	io.Copy(stream, content)
-	stream.Close()
-
-	err = <-stream.E
-	if err != nil {
-		return err
 	}
 
 	return nil
@@ -629,21 +641,13 @@ func (kd *kubeEngine) Write(node, path string, content io.Reader) error {
 
 // Exec implements the IO interface to execute a command on a node. It returns
 // the output if the command is a success, or it returns the error.
-func (kd *kubeEngine) Exec(node string, cmd []string) ([]byte, error) {
-	stream, err := kd.kio.Exec(kd.findPodName(node), ContainerAppName, cmd)
+func (kd *kubeEngine) Exec(node string, cmd []string, options sim.ExecOptions) error {
+	err := kd.kio.Exec(kd.findPodName(node), ContainerAppName, cmd, options)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't open stream: %w", err)
+		return fmt.Errorf("couldn't open stream: %w", err)
 	}
 
-	stream.Close()
-	out := <-stream.O
-
-	err = <-stream.E
-	if err != nil {
-		return out, err
-	}
-
-	return out, nil
+	return nil
 }
 
 func (kd *kubeEngine) String() string {

@@ -210,7 +210,7 @@ func (s *Strategy) Execute(round sim.Round) error {
 
 	s.executeTime = time.Now()
 
-	err = round.Execute(ctx)
+	err = round.Execute(ctx, s.engine)
 	if err != nil {
 		return err
 	}

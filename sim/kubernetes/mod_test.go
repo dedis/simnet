@@ -386,8 +386,8 @@ func (te *testEngine) Write(node, path string, content io.Reader) error {
 	return nil
 }
 
-func (te *testEngine) Exec(node string, cmd []string) ([]byte, error) {
-	return nil, nil
+func (te *testEngine) Exec(node string, cmd []string, options sim.ExecOptions) error {
+	return nil
 }
 
 func (te *testEngine) String() string {
@@ -400,11 +400,11 @@ type testRound struct {
 	errCfg error
 }
 
-func (tr testRound) Configure(sio sim.IO) error {
+func (tr testRound) Configure(simio sim.IO) error {
 	return tr.errCfg
 }
 
-func (tr testRound) Execute(ctx context.Context) error {
+func (tr testRound) Execute(ctx context.Context, simio sim.IO) error {
 	if tr.err != nil {
 		return tr.err
 	}
