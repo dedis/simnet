@@ -476,10 +476,14 @@ func TestStrategy_WriteStatsFailures(t *testing.T) {
 	require.True(t, errors.Is(err, e), err.Error())
 
 	s.encoder = jsonEncoder
-	s.options.OutputDir = ""
+	err = s.WriteStats("\000")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid argument")
+
+	s.options.OutputDir = "\000"
 	err = s.WriteStats("")
 	require.Error(t, err)
-	require.EqualError(t, err, "open : no such file or directory")
+	require.EqualError(t, err, "mkdir \x00: invalid argument")
 }
 
 func TestStrategy_Clean(t *testing.T) {

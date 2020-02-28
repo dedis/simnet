@@ -486,6 +486,11 @@ func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
 			if e.ErrStatus.Reason != metav1.StatusReasonNotFound {
 				return nil, e
 			}
+
+			// If the service is simply not found, it ignores the error
+			// and keep on the cleaning.
+		} else {
+			return nil, e
 		}
 	}
 

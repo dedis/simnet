@@ -568,7 +568,10 @@ func (s *Strategy) WriteStats(filename string) error {
 	s.statsLock.Lock()
 	defer s.statsLock.Unlock()
 
-	// TODO: make the output directory..
+	err := os.MkdirAll(s.options.OutputDir, 0755)
+	if err != nil {
+		return err
+	}
 
 	file, err := os.Create(filepath.Join(s.options.OutputDir, filename))
 	if err != nil {

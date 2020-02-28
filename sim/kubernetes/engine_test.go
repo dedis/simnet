@@ -520,11 +520,26 @@ func TestEngine_DeleteFailure(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
-	engine.client = fake.NewSimpleClientset()
+	client = fake.NewSimpleClientset()
+	client.PrependReactor("*", "services", func(action testcore.Action) (bool, runtime.Object, error) {
+		return true, nil, e
+	})
+
+	engine.client = client
+
 	_, err = engine.DeleteAll()
 	require.Error(t, err)
 	require.IsType(t, (*apierrors.StatusError)(nil), err)
 
+	client.PrependReactor("*", "services", func(action testcore.Action) (bool, runtime.Object, error) {
+		return true, nil, &apierrors.StatusError{
+			ErrStatus: metav1.Status{
+				Reason: metav1.StatusReasonBadRequest,
+			},
+		}
+	})
+	_, err = engine.DeleteAll()
+	require.Error(t, err)
 }
 
 func TestEngine_WaitDeletion(t *testing.T) {
