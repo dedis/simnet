@@ -456,6 +456,58 @@ func (s *Strategy) monitorContainer(ctx context.Context, container types.Contain
 	return closer, nil
 }
 
+func (s *Strategy) streamLogs() (func(), error) {
+	cancels := make([]func(), 0, len(s.containers))
+
+	// Provide a single function to close all the streams.
+	cancelAll := func() {
+		for _, cancel := range cancels {
+			cancel()
+		}
+	}
+
+	logFolder := filepath.Join(s.options.OutputDir, "logs")
+
+	// Clean the folder so it does not mix different simulations.
+	err := os.RemoveAll(logFolder)
+	if err != nil {
+		return cancelAll, err
+	}
+
+	err = os.MkdirAll(logFolder, 0755)
+	if err != nil {
+		return cancelAll, err
+	}
+
+	for _, container := range s.containers {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancels = append(cancels, cancel)
+
+		reader, err := s.cli.ContainerLogs(ctx, container.ID, types.ContainerLogsOptions{
+			ShowStderr: true,
+			ShowStdout: true,
+			Timestamps: true,
+			Follow:     true,
+		})
+
+		if err != nil {
+			return cancelAll, err
+		}
+
+		f, err := os.Create(filepath.Join(logFolder, container.Names[0]))
+		if err != nil {
+			return cancelAll, err
+		}
+
+		go func() {
+			io.Copy(f, reader)
+			f.Close()
+		}()
+	}
+
+	return cancelAll, nil
+}
+
 // Execute takes the round and execute it against the context created from the
 // options.
 func (s *Strategy) Execute(round sim.Round) error {
@@ -488,6 +540,14 @@ func (s *Strategy) Execute(round sim.Round) error {
 		closers = append(closers, closer)
 	}
 
+	// Listen for the container logs and write the output in separate files
+	// for each of them in the output folder.
+	cancel, err := s.streamLogs()
+	defer cancel()
+	if err != nil {
+		return err
+	}
+
 	s.statsLock.Lock()
 	s.stats.Timestamp = time.Now().Unix()
 	s.statsLock.Unlock()
@@ -507,6 +567,8 @@ func (s *Strategy) Execute(round sim.Round) error {
 func (s *Strategy) WriteStats(filename string) error {
 	s.statsLock.Lock()
 	defer s.statsLock.Unlock()
+
+	// TODO: make the output directory..
 
 	file, err := os.Create(filepath.Join(s.options.OutputDir, filename))
 	if err != nil {

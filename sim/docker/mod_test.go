@@ -347,9 +347,15 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
-	e := errors.New("sim error")
+	e := errors.New("log error")
+	client.errContainerLogs = e
+	err := s.Execute(&testRound{})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
 
-	err := s.Execute(&testRound{err: e})
+	client.resetErrors()
+	e = errors.New("sim error")
+	err = s.Execute(&testRound{err: e})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
@@ -404,6 +410,40 @@ func TestStrategy_MonitorContainerFailures(t *testing.T) {
 	err := s.Execute(&testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e), err.Error())
+}
+
+func TestStrategy_StreamLogsFailures(t *testing.T) {
+	client := &testClient{numContainers: 3}
+	s, clean := newTestStrategyWithClient(t, client)
+	defer clean()
+
+	s.containers = []types.Container{
+		makeTestContainer("id:node0"),
+		makeTestContainer("id:node1"),
+	}
+
+	e := errors.New("log stream error")
+	client.errContainerLogs = e
+	cancel, err := s.streamLogs()
+	cancel()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
+
+	client.resetErrors()
+	s.containers[1].Names = []string{"\000"}
+	cancel, err = s.streamLogs()
+	cancel()
+	require.Error(t, err)
+
+	s.options.OutputDir = "\000"
+	cancel, err = s.streamLogs()
+	cancel()
+	require.Error(t, err)
+
+	s.options.OutputDir = "/etc"
+	cancel, err = s.streamLogs()
+	cancel()
+	require.Error(t, err)
 }
 
 func TestStrategy_WriteStats(t *testing.T) {
@@ -603,6 +643,7 @@ type testClient struct {
 	errContainerStop   error
 	errContainerList   error
 	errContainerStats  error
+	errContainerLogs   error
 	errAttachConn      error
 	errEvent           error
 }
@@ -616,6 +657,7 @@ func (c *testClient) resetErrors() {
 	c.errContainerStop = nil
 	c.errContainerList = nil
 	c.errContainerStats = nil
+	c.errContainerLogs = nil
 	c.errAttachConn = nil
 	c.errEvent = nil
 }
@@ -709,6 +751,12 @@ func (c *testClient) ContainerStop(ctx context.Context, id string, t *time.Durat
 	c.callsContainerStop = append(c.callsContainerStop, testCallContainerStop{ctx, id, t})
 
 	return c.errContainerStop
+}
+
+func (c *testClient) ContainerLogs(ctx context.Context, id string, options types.ContainerLogsOptions) (io.ReadCloser, error) {
+	reader := ioutil.NopCloser(new(bytes.Buffer))
+
+	return reader, c.errContainerLogs
 }
 
 func (c *testClient) Events(ctx context.Context, options types.EventsOptions) (<-chan events.Message, <-chan error) {
