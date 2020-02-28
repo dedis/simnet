@@ -1,7 +1,6 @@
 package sim
 
 import (
-	"context"
 	"io"
 )
 
@@ -27,15 +26,27 @@ type IO interface {
 	Exec(node string, cmd []string, options ExecOptions) error
 }
 
+// NodeInfoKey is the single value key that is available in execution context
+// to get information about the simulation nodes.
+type NodeInfoKey struct{}
+
+// NodeInfo is the element value of the array available in the execution
+// context.
+// Use `nodes := ctx.Value(NodesKey{}).([]NodeInfo)` to retrieve the data.
+type NodeInfo struct {
+	Name    string
+	Address string
+}
+
 // Round is executed during the simulation.
 type Round interface {
 	// Configure is run before Execute so that initialization can be performed
 	// before the simulation is executed.
-	Configure(simio IO) error
+	Configure(simio IO, nodes []NodeInfo) error
 
 	// Execute is run during the execution step of the simulation, which is
 	// after the nodes are deployed.
-	Execute(ctx context.Context, simio IO) error
+	Execute(simio IO, nodes []NodeInfo) error
 }
 
 // Strategy provides the primitives to run a simulation from the
@@ -56,16 +67,4 @@ type Strategy interface {
 
 	// Clean wipes off any resources that has been created for the simulation.
 	Clean() error
-}
-
-// NodeInfoKey is the single value key that is available in execution context
-// to get information about the simulation nodes.
-type NodeInfoKey struct{}
-
-// NodeInfo is the element value of the array available in the execution
-// context.
-// Use `nodes := ctx.Value(NodesKey{}).([]NodeInfo)` to retrieve the data.
-type NodeInfo struct {
-	Name    string
-	Address string
 }

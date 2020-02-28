@@ -1,7 +1,6 @@
 package kubernetes
 
 import (
-	"context"
 	"errors"
 	"io"
 	"io/ioutil"
@@ -139,15 +138,7 @@ func TestStrategy_DeployWithFailures(t *testing.T) {
 }
 
 func TestStrategy_Execute(t *testing.T) {
-	key := sim.FilesKey("a")
-	options := []sim.Option{
-		sim.WithFileMapper(key, sim.FileMapper{
-			Path: "/a/file/path",
-			Mapper: func(io.Reader) (interface{}, error) {
-				return "content", nil
-			},
-		}),
-	}
+	options := []sim.Option{}
 
 	stry := &Strategy{
 		pods: []apiv1.Pod{
@@ -158,67 +149,25 @@ func TestStrategy_Execute(t *testing.T) {
 		options: sim.NewOptions(options),
 	}
 
-	done := make(chan struct{}, 1)
-	h := func(ctx context.Context) {
-		contents := ctx.Value(key).(sim.Files)
-		require.Equal(t, len(stry.pods), len(contents))
-		require.Equal(t, "content", contents[sim.Identifier{Index: 0, ID: "a", IP: "a.a.a.a"}])
-
-		nodes := ctx.Value(sim.NodeInfoKey{}).([]sim.NodeInfo)
-		require.Len(t, nodes, len(stry.pods))
-		for i, node := range nodes {
-			require.Equal(t, stry.pods[i].Name, node.Name)
-			require.Equal(t, stry.pods[i].Status.PodIP, node.Address)
-		}
-
-		done <- struct{}{}
-	}
-
-	err := stry.Execute(testRound{h: h})
+	err := stry.Execute(testRound{})
 	require.NoError(t, err)
 	require.True(t, stry.doneTime.After(stry.executeTime))
-
-	select {
-	case <-done:
-	default:
-		t.Fatal("handler not called")
-	}
 }
 
 func TestStrategy_ExecuteFailure(t *testing.T) {
-	e := errors.New("read error")
-	e2 := errors.New("mapper error")
-	options := []sim.Option{
-		sim.WithFileMapper(sim.FilesKey(""), sim.FileMapper{
-			Path: "/a/file/path",
-			Mapper: func(io.Reader) (interface{}, error) {
-				return nil, e2
-			},
-		}),
-	}
-
 	stry := &Strategy{
 		pods:    []apiv1.Pod{{}},
-		engine:  &testEngine{errRead: e},
-		options: sim.NewOptions(options),
+		engine:  &testEngine{},
+		options: sim.NewOptions(nil),
 	}
 
-	err := stry.Execute(testRound{})
-	require.Error(t, err)
-	require.Equal(t, e, err)
-
-	e = errors.New("stream error")
+	e := errors.New("stream error")
 	stry.engine = &testEngine{errStreamLogs: e}
-	err = stry.Execute(testRound{})
+	err := stry.Execute(testRound{})
 	require.Error(t, err)
 	require.Equal(t, err, e)
 
 	stry.engine = &testEngine{}
-	err = stry.Execute(testRound{})
-	require.Error(t, err)
-	require.Equal(t, e2, err)
-
-	stry.options = sim.NewOptions([]sim.Option{})
 	e = errors.New("round error")
 	err = stry.Execute(testRound{err: e})
 	require.Error(t, err)
@@ -395,23 +344,21 @@ func (te *testEngine) String() string {
 }
 
 type testRound struct {
-	h      func(context.Context)
+	nodes  []sim.NodeInfo
 	err    error
 	errCfg error
 }
 
-func (tr testRound) Configure(simio sim.IO) error {
+func (tr testRound) Configure(simio sim.IO, nodes []sim.NodeInfo) error {
 	return tr.errCfg
 }
 
-func (tr testRound) Execute(ctx context.Context, simio sim.IO) error {
+func (tr testRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	if tr.err != nil {
 		return tr.err
 	}
 
-	if tr.h != nil {
-		tr.h(ctx)
-	}
+	tr.nodes = nodes
 
 	return nil
 }

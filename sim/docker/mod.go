@@ -364,7 +364,7 @@ func (s *Strategy) Deploy(round sim.Round) error {
 		return fmt.Errorf("couldn't configure the containers: %w", err)
 	}
 
-	err = round.Configure(s.dio)
+	err = round.Configure(s.dio, s.makeExecutionContext())
 	if err != nil {
 		return err
 	}
@@ -375,10 +375,7 @@ func (s *Strategy) Deploy(round sim.Round) error {
 	return nil
 }
 
-func (s *Strategy) makeExecutionContext() (context.Context, error) {
-	ctx := context.Background()
-
-	// Provide information about the nodes.
+func (s *Strategy) makeExecutionContext() []sim.NodeInfo {
 	nodes := make([]sim.NodeInfo, len(s.containers))
 	for i, container := range s.containers {
 		netcfg := container.NetworkSettings.Networks[DefaultContainerNetwork]
@@ -386,34 +383,8 @@ func (s *Strategy) makeExecutionContext() (context.Context, error) {
 		nodes[i].Name = containerName(container)
 		nodes[i].Address = netcfg.IPAddress
 	}
-	ctx = context.WithValue(ctx, sim.NodeInfoKey{}, nodes)
 
-	// Read files required by the simulation.
-	for key, fm := range s.options.Files {
-		files := make(sim.Files)
-
-		for i, container := range s.containers {
-			reader, err := s.dio.Read(container.ID, fm.Path)
-			if err != nil {
-				return nil, fmt.Errorf("couldn't copy file: %w", err)
-			}
-
-			ident := sim.Identifier{
-				Index: i,
-				ID:    network.Node(containerName(container)),
-				IP:    container.NetworkSettings.Networks[DefaultContainerNetwork].IPAddress,
-			}
-
-			files[ident], err = fm.Mapper(reader)
-			if err != nil {
-				return nil, fmt.Errorf("mapper failed: %w", err)
-			}
-		}
-
-		ctx = context.WithValue(ctx, key, files)
-	}
-
-	return ctx, nil
+	return nodes
 }
 
 func (s *Strategy) monitorContainer(ctx context.Context, container types.Container) (func(), error) {
@@ -516,11 +487,6 @@ func (s *Strategy) Execute(round sim.Round) error {
 		return fmt.Errorf("couldn't update the states: %w", err)
 	}
 
-	ctx, err := s.makeExecutionContext()
-	if err != nil {
-		return fmt.Errorf("couldn't create the context: %w", err)
-	}
-
 	closers := make([]func(), 0, len(s.containers))
 
 	// It's important to close any existing stream even if an error
@@ -552,7 +518,7 @@ func (s *Strategy) Execute(round sim.Round) error {
 	s.stats.Timestamp = time.Now().Unix()
 	s.statsLock.Unlock()
 
-	err = round.Execute(ctx, s.dio)
+	err = round.Execute(s.dio, s.makeExecutionContext())
 	if err != nil {
 		return fmt.Errorf("couldn't execute: %w", err)
 	}

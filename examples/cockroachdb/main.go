@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -21,7 +20,7 @@ var (
 
 type simRound struct{}
 
-func (s simRound) Configure(simio sim.IO) error {
+func (s simRound) Configure(simio sim.IO, nodes []sim.NodeInfo) error {
 	reader, writer := io.Pipe()
 
 	go io.Copy(os.Stdout, reader)
@@ -38,8 +37,7 @@ func (s simRound) Configure(simio sim.IO) error {
 	return nil
 }
 
-func (s simRound) Execute(ctx context.Context, simio sim.IO) error {
-	nodes := ctx.Value(sim.NodeInfoKey{}).([]sim.NodeInfo)
+func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	fmt.Printf("Nodes: %v\n", nodes)
 
 	reader, writer := io.Pipe()

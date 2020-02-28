@@ -2,7 +2,6 @@ package simnet
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"os"
 	"testing"
@@ -13,11 +12,11 @@ import (
 
 type testRound struct{}
 
-func (t testRound) Configure(simio sim.IO) error {
+func (t testRound) Configure(simio sim.IO, nodes []sim.NodeInfo) error {
 	return nil
 }
 
-func (t testRound) Execute(ctx context.Context, simio sim.IO) error {
+func (t testRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	return nil
 }
 

@@ -291,16 +291,17 @@ func TestStrategy_WaitExecFailures(t *testing.T) {
 }
 
 type testRound struct {
-	err error
-	ctx context.Context
+	err   error
+	nodes []sim.NodeInfo
 }
 
-func (r *testRound) Configure(simio sim.IO) error {
+func (r *testRound) Configure(simio sim.IO, nodes []sim.NodeInfo) error {
+	r.nodes = nodes
 	return r.err
 }
 
-func (r *testRound) Execute(ctx context.Context, simio sim.IO) error {
-	r.ctx = ctx
+func (r *testRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
+	r.nodes = nodes
 	return r.err
 }
 
@@ -316,12 +317,8 @@ func TestStrategy_Execute(t *testing.T) {
 
 	require.True(t, s.updated)
 
-	require.NotNil(t, round.ctx.Value(sim.FilesKey("testFiles")))
-	require.Nil(t, round.ctx.Value(sim.FilesKey("")))
-
-	nodes := round.ctx.Value(sim.NodeInfoKey{}).([]sim.NodeInfo)
-	require.Len(t, nodes, n)
-	for i, node := range nodes {
+	require.Len(t, round.nodes, n)
+	for i, node := range round.nodes {
 		require.Equal(t, containerName(s.containers[i]), node.Name)
 		netcfg := s.containers[i].NetworkSettings.Networks[DefaultContainerNetwork]
 		require.Equal(t, netcfg.IPAddress, node.Address)
@@ -366,35 +363,6 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 	err = s.Execute(&testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
-}
-
-func TestStrategy_MakeContextFailures(t *testing.T) {
-	client := &testClient{numContainers: 3}
-	s, clean := newTestStrategyWithClient(t, client)
-	defer clean()
-
-	s.containers = []types.Container{makeTestContainer("id:node0")}
-
-	e := errors.New("copy file error")
-	s.dio = testDockerIO{err: e}
-
-	err := s.Execute(&testRound{})
-	require.Error(t, err)
-	require.EqualError(t, errors.Unwrap(errors.Unwrap(err)), e.Error())
-
-	client.resetErrors()
-	s.dio = testDockerIO{}
-	e = errors.New("mapper error")
-	s.options.Files[sim.FilesKey("error")] = sim.FileMapper{
-		Path: "",
-		Mapper: func(io.Reader) (interface{}, error) {
-			return nil, e
-		},
-	}
-
-	err = s.Execute(&testRound{})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e), err.Error())
 }
 
 func TestStrategy_MonitorContainerFailures(t *testing.T) {

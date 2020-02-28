@@ -1,7 +1,6 @@
 package kubernetes
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"go.dedis.ch/simnet/metrics"
-	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
@@ -143,7 +141,7 @@ func (s *Strategy) Deploy(round sim.Round) error {
 	}
 
 	// Run the configuration step.
-	err = round.Configure(s.engine)
+	err = round.Configure(s.engine, s.makeContext())
 	if err != nil {
 		return err
 	}
@@ -151,42 +149,14 @@ func (s *Strategy) Deploy(round sim.Round) error {
 	return nil
 }
 
-func (s *Strategy) makeContext() (context.Context, error) {
-	ctx := context.Background()
-
+func (s *Strategy) makeContext() []sim.NodeInfo {
 	nodes := make([]sim.NodeInfo, len(s.pods))
 	for i, pod := range s.pods {
 		nodes[i].Name = pod.Name
 		nodes[i].Address = pod.Status.PodIP
 	}
 
-	ctx = context.WithValue(ctx, sim.NodeInfoKey{}, nodes)
-
-	for key, fm := range s.options.Files {
-		files := make(sim.Files)
-
-		for i, pod := range s.pods {
-			reader, err := s.engine.Read(pod.Labels[LabelNode], fm.Path)
-			if err != nil {
-				return nil, err
-			}
-
-			ident := sim.Identifier{
-				Index: i,
-				ID:    network.Node(pod.Name),
-				IP:    pod.Status.PodIP,
-			}
-
-			files[ident], err = fm.Mapper(reader)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		ctx = context.WithValue(ctx, key, files)
-	}
-
-	return ctx, nil
+	return nodes
 }
 
 // Execute uses the round implementation to execute a simulation round.
@@ -202,14 +172,9 @@ func (s *Strategy) Execute(round sim.Round) error {
 		return err
 	}
 
-	ctx, err := s.makeContext()
-	if err != nil {
-		return err
-	}
-
 	s.executeTime = time.Now()
 
-	err = round.Execute(ctx, s.engine)
+	err = round.Execute(s.engine, s.makeContext())
 	if err != nil {
 		return err
 	}
