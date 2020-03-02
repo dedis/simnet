@@ -4,6 +4,7 @@ import (
 	"io"
 )
 
+// ExecOptions is the options to pass to a command execution.
 type ExecOptions struct {
 	Stdin  io.Reader
 	Stdout io.Writer
@@ -26,10 +27,6 @@ type IO interface {
 	Exec(node string, cmd []string, options ExecOptions) error
 }
 
-// NodeInfoKey is the single value key that is available in execution context
-// to get information about the simulation nodes.
-type NodeInfoKey struct{}
-
 // NodeInfo is the element value of the array available in the execution
 // context.
 // Use `nodes := ctx.Value(NodesKey{}).([]NodeInfo)` to retrieve the data.
@@ -40,13 +37,17 @@ type NodeInfo struct {
 
 // Round is executed during the simulation.
 type Round interface {
-	// Configure is run before Execute so that initialization can be performed
-	// before the simulation is executed.
-	Configure(simio IO, nodes []NodeInfo) error
+	// Before is run once after deployment so that initialization can be
+	// performed before the simulation is executed.
+	Before(simio IO, nodes []NodeInfo) error
 
 	// Execute is run during the execution step of the simulation, which is
 	// after the nodes are deployed.
 	Execute(simio IO, nodes []NodeInfo) error
+
+	// After is run after each execution of the simulation to give a chance
+	// to read files from simulation nodes.
+	After(simio IO, nodes []NodeInfo) error
 }
 
 // Strategy provides the primitives to run a simulation from the

@@ -20,7 +20,7 @@ var (
 
 type simRound struct{}
 
-func (s simRound) Configure(simio sim.IO, nodes []sim.NodeInfo) error {
+func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	reader, writer := io.Pipe()
 
 	go io.Copy(os.Stdout, reader)
@@ -64,6 +64,10 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	// the pipe.
 	writer.Close()
 
+	return nil
+}
+
+func (s simRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
 	return nil
 }
 

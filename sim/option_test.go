@@ -2,7 +2,6 @@ package sim
 
 import (
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,35 +32,6 @@ func TestOption_Output(t *testing.T) {
 
 	options = NewOptions([]Option{WithOutput("")})
 	require.Equal(t, filepath.Join(".config", "simnet"), options.OutputDir)
-}
-
-func TestOption_IdentifierString(t *testing.T) {
-	ident := Identifier{
-		Index: 1,
-		ID:    "node0",
-		IP:    "1.2.3.4",
-	}
-
-	require.Equal(t, "node0@1.2.3.4", ident.String())
-}
-
-func TestOption_FileMapper(t *testing.T) {
-	e := errors.New("oops")
-	options := NewOptions([]Option{WithFileMapper(FilesKey("abc"), FileMapper{
-		Path: "/path/to/file",
-		Mapper: func(r io.Reader) (interface{}, error) {
-			return nil, e
-		},
-	})})
-
-	fm, ok := options.Files[FilesKey("abc")]
-	require.True(t, ok)
-	require.Equal(t, "/path/to/file", fm.Path)
-	_, err := fm.Mapper(nil)
-	require.Equal(t, e, err)
-
-	fm, ok = options.Files[FilesKey("")]
-	require.False(t, ok)
 }
 
 func TestOption_Topology(t *testing.T) {

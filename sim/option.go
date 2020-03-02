@@ -2,7 +2,6 @@ package sim
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +14,6 @@ var userHomeDir = os.UserHomeDir
 // Options contains the different options for a simulation execution.
 type Options struct {
 	OutputDir string
-	Files     map[FilesKey]FileMapper
 	Topology  network.Topology
 	Image     string
 	Cmd       []string
@@ -25,9 +23,7 @@ type Options struct {
 
 // NewOptions creates empty options.
 func NewOptions(opts []Option) *Options {
-	o := &Options{
-		Files: make(map[FilesKey]FileMapper),
-	}
+	o := &Options{}
 
 	for _, f := range opts {
 		f(o)
@@ -59,40 +55,6 @@ type Option func(opts *Options)
 func WithOutput(dir string) Option {
 	return func(opts *Options) {
 		opts.OutputDir = dir
-	}
-}
-
-// FilesKey is the kind of key that will be used to retrieve the files
-// inside the execution context.
-type FilesKey string
-
-// Identifier stores information about a node that can uniquely identify it.
-type Identifier struct {
-	Index int
-	ID    network.Node
-	IP    string
-}
-
-func (id Identifier) String() string {
-	return fmt.Sprintf("%s@%s", id.ID, id.IP)
-}
-
-// Files is the structure stored in the context for the file mappers.
-type Files map[Identifier]interface{}
-
-// FileMapper gives a file path and a map function so that the engine can read
-// a file from the simulation node and map the content to a generic instance.
-type FileMapper struct {
-	Path   string
-	Mapper func(io.Reader) (interface{}, error)
-}
-
-// WithFileMapper is an option for simulation engines to read files on the
-// simulation nodes and convert the content. It will then be available in the
-// execution context.
-func WithFileMapper(key FilesKey, fm FileMapper) Option {
-	return func(opts *Options) {
-		opts.Files[key] = fm
 	}
 }
 

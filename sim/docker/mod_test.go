@@ -139,7 +139,7 @@ func TestStrategy_RoundConfigureFailure(t *testing.T) {
 	defer clean()
 
 	e := errors.New("configure error")
-	err := s.Deploy(&testRound{err: e})
+	err := s.Deploy(&testRound{errBefore: e})
 	require.Error(t, err)
 	require.Equal(t, err, e)
 }
@@ -291,18 +291,25 @@ func TestStrategy_WaitExecFailures(t *testing.T) {
 }
 
 type testRound struct {
-	err   error
-	nodes []sim.NodeInfo
+	errBefore error
+	errAfter  error
+	nodes     []sim.NodeInfo
+	afterDone bool
 }
 
-func (r *testRound) Configure(simio sim.IO, nodes []sim.NodeInfo) error {
+func (r *testRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	r.nodes = nodes
-	return r.err
+	return r.errBefore
 }
 
 func (r *testRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	r.nodes = nodes
-	return r.err
+	return r.errBefore
+}
+
+func (r *testRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
+	r.afterDone = true
+	return r.errAfter
 }
 
 func TestStrategy_Execute(t *testing.T) {
@@ -316,6 +323,7 @@ func TestStrategy_Execute(t *testing.T) {
 	require.NoError(t, err)
 
 	require.True(t, s.updated)
+	require.True(t, round.afterDone)
 
 	require.Len(t, round.nodes, n)
 	for i, node := range round.nodes {
@@ -352,7 +360,12 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 
 	client.resetErrors()
 	e = errors.New("sim error")
-	err = s.Execute(&testRound{err: e})
+	err = s.Execute(&testRound{errBefore: e})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
+
+	e = errors.New("after error")
+	err = s.Execute(&testRound{errAfter: e})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
@@ -806,12 +819,6 @@ func newTestStrategy(t *testing.T) (*Strategy, func()) {
 				sim.NewTCP(2000),
 				sim.NewUDP(2001),
 			),
-			sim.WithFileMapper(sim.FilesKey("testFiles"), sim.FileMapper{
-				Path: "/path/to/file",
-				Mapper: func(io.Reader) (interface{}, error) {
-					return struct{}{}, nil
-				},
-			}),
 		}),
 		containers: make([]types.Container, 0),
 		stats: &metrics.Stats{

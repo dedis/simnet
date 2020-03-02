@@ -85,55 +85,55 @@ func TestStrategy_DeployWithFailures(t *testing.T) {
 		tun:     testTunnel{},
 	}
 
-	err := stry.Deploy(testRound{})
+	err := stry.Deploy(&testRound{})
 	require.NoError(t, err)
 
 	// Errors are tested in reverse order to avoid to reset err fields
 	// all the time.
 
 	e := errors.New("configuration error")
-	err = stry.Deploy(testRound{errCfg: e})
+	err = stry.Deploy(&testRound{errBefore: e})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
 	e = errors.New("tunnel start error")
 	stry.tun = testTunnel{err: e}
-	err = stry.Deploy(testRound{})
+	err = stry.Deploy(&testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("fetch router error")
 	deployer.errFetchCerts = e
-	err = stry.Deploy(testRound{})
+	err = stry.Deploy(&testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("wait router error")
 	deployer.errWaitRouter = e
-	err = stry.Deploy(testRound{})
+	err = stry.Deploy(&testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("deploy router error")
 	deployer.errDeployRouter = e
-	err = stry.Deploy(testRound{})
+	err = stry.Deploy(&testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("upload config error")
 	deployer.errUploadConfig = e
-	err = stry.Deploy(testRound{})
+	err = stry.Deploy(&testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("fetch pods error")
 	deployer.errFetchPods = e
-	err = stry.Deploy(testRound{})
+	err = stry.Deploy(&testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("wait deployment error")
 	deployer.errWaitDeployment = e
-	err = stry.Deploy(testRound{})
+	err = stry.Deploy(&testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("create deployment error")
 	deployer.errDeployment = e
-	err = stry.Deploy(testRound{})
+	err = stry.Deploy(&testRound{})
 	require.Equal(t, e, err)
 }
 
@@ -149,9 +149,12 @@ func TestStrategy_Execute(t *testing.T) {
 		options: sim.NewOptions(options),
 	}
 
-	err := stry.Execute(testRound{})
+	round := &testRound{}
+
+	err := stry.Execute(round)
 	require.NoError(t, err)
 	require.True(t, stry.doneTime.After(stry.executeTime))
+	require.True(t, round.afterDone)
 }
 
 func TestStrategy_ExecuteFailure(t *testing.T) {
@@ -163,13 +166,18 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 
 	e := errors.New("stream error")
 	stry.engine = &testEngine{errStreamLogs: e}
-	err := stry.Execute(testRound{})
+	err := stry.Execute(&testRound{})
 	require.Error(t, err)
 	require.Equal(t, err, e)
 
 	stry.engine = &testEngine{}
 	e = errors.New("round error")
-	err = stry.Execute(testRound{err: e})
+	err = stry.Execute(&testRound{err: e})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, e))
+
+	e = errors.New("after error")
+	err = stry.Execute(&testRound{errAfter: e})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 }
@@ -344,16 +352,18 @@ func (te *testEngine) String() string {
 }
 
 type testRound struct {
-	nodes  []sim.NodeInfo
-	err    error
-	errCfg error
+	nodes     []sim.NodeInfo
+	afterDone bool
+	err       error
+	errBefore error
+	errAfter  error
 }
 
-func (tr testRound) Configure(simio sim.IO, nodes []sim.NodeInfo) error {
-	return tr.errCfg
+func (tr *testRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
+	return tr.errBefore
 }
 
-func (tr testRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
+func (tr *testRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	if tr.err != nil {
 		return tr.err
 	}
@@ -361,6 +371,11 @@ func (tr testRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	tr.nodes = nodes
 
 	return nil
+}
+
+func (tr *testRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
+	tr.afterDone = true
+	return tr.errAfter
 }
 
 type testVPN struct {

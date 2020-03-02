@@ -12,11 +12,15 @@ import (
 
 type testRound struct{}
 
-func (t testRound) Configure(simio sim.IO, nodes []sim.NodeInfo) error {
+func (t testRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	return nil
 }
 
 func (t testRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
+	return nil
+}
+
+func (t testRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
 	return nil
 }
 

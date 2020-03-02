@@ -140,8 +140,9 @@ func (s *Strategy) Deploy(round sim.Round) error {
 		return err
 	}
 
-	// Run the configuration step.
-	err = round.Configure(s.engine, s.makeContext())
+	// Before is run at the end of the deployment so that the Execute
+	// step can be run multiple times.
+	err = round.Before(s.engine, s.makeContext())
 	if err != nil {
 		return err
 	}
@@ -174,12 +175,19 @@ func (s *Strategy) Execute(round sim.Round) error {
 
 	s.executeTime = time.Now()
 
-	err = round.Execute(s.engine, s.makeContext())
+	nodes := s.makeContext()
+
+	err = round.Execute(s.engine, nodes)
 	if err != nil {
-		return err
+		return fmt.Errorf("couldn't perform execute step: %w", err)
 	}
 
 	s.doneTime = time.Now()
+
+	err = round.After(s.engine, nodes)
+	if err != nil {
+		return fmt.Errorf("couldn't perform after step: %w", err)
+	}
 
 	return nil
 }

@@ -364,7 +364,7 @@ func (s *Strategy) Deploy(round sim.Round) error {
 		return fmt.Errorf("couldn't configure the containers: %w", err)
 	}
 
-	err = round.Configure(s.dio, s.makeExecutionContext())
+	err = round.Before(s.dio, s.makeExecutionContext())
 	if err != nil {
 		return err
 	}
@@ -518,9 +518,17 @@ func (s *Strategy) Execute(round sim.Round) error {
 	s.stats.Timestamp = time.Now().Unix()
 	s.statsLock.Unlock()
 
-	err = round.Execute(s.dio, s.makeExecutionContext())
+	nodes := s.makeExecutionContext()
+
+	err = round.Execute(s.dio, nodes)
 	if err != nil {
 		return fmt.Errorf("couldn't execute: %w", err)
+	}
+
+	// After step so that it is executed after each experiment.
+	err = round.After(s.dio, nodes)
+	if err != nil {
+		return fmt.Errorf("couldn't perform after step: %w", err)
 	}
 
 	fmt.Fprintln(s.out, "Execution... Done.")
