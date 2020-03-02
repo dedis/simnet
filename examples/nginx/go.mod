@@ -4,4 +4,4 @@ go 1.13
 
 // replace go.dedis.ch/simnet => ../..
 
-require go.dedis.ch/simnet v0.3.0
+require go.dedis.ch/simnet v0.3.1

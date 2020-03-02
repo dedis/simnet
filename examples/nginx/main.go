@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -16,12 +15,11 @@ import (
 
 type simRound struct{}
 
-func (s simRound) Configure(simio sim.IO) error {
+func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	return nil
 }
 
-func (s simRound) Execute(ctx context.Context, simio sim.IO) error {
-	nodes := ctx.Value(sim.NodeInfoKey{}).([]sim.NodeInfo)
+func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	fmt.Printf("Nodes: %v\n", nodes)
 
 	for _, node := range nodes {
@@ -40,6 +38,10 @@ func (s simRound) Execute(ctx context.Context, simio sim.IO) error {
 		fmt.Printf("Found page of length %d bytes for %s\n", len(body), node.Name)
 	}
 
+	return nil
+}
+
+func (s simRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
 	return nil
 }
 

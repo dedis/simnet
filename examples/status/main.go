@@ -1,9 +1,7 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -11,6 +9,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/buger/goterm"
 	status "go.dedis.ch/cothority/v3/status/service"
+	"go.dedis.ch/onet/v3"
 	"go.dedis.ch/onet/v3/app"
 	"go.dedis.ch/onet/v3/network"
 	"go.dedis.ch/simnet"
@@ -22,31 +21,27 @@ import (
 // them for their status.
 type statusSimulationRound struct{}
 
-func (r statusSimulationRound) Configure(simio sim.IO) error {
+func (r statusSimulationRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	return nil
 }
 
 // Execute will contact each known node and ask for its status.
-func (r statusSimulationRound) Execute(ctx context.Context, simio sim.IO) error {
-	files := ctx.Value(sim.FilesKey("private.toml")).(sim.Files)
-	idents := make([]*network.ServerIdentity, len(files))
-
-	for id, value := range files {
-		si := value.(*network.ServerIdentity)
-		si.Address = network.NewAddress(network.TLS, fmt.Sprintf("%s:7770", id.IP))
-		idents[id.Index] = si
+func (r statusSimulationRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
+	roster, err := readRoster(simio, nodes)
+	if err != nil {
+		return err
 	}
 
 	fmt.Print("Checking connectivity...")
 	client := status.NewClient()
 
-	for i := range idents {
-		ro := make([]*network.ServerIdentity, 1, len(idents))
-		ro[0] = idents[i]
-		ro = append(ro, idents[:i]...)
-		ro = append(ro, idents[i+1:]...)
+	for i, node := range roster.List {
+		ro := make([]*network.ServerIdentity, 1, len(roster.List))
+		ro[0] = node
+		ro = append(ro, roster.List[:i]...)
+		ro = append(ro, roster.List[i+1:]...)
 
-		fmt.Printf(goterm.ResetLine("Checking connectivity... [%d/%d]"), i+1, len(idents))
+		fmt.Printf(goterm.ResetLine("Checking connectivity... [%d/%d]"), i+1, len(roster.List))
 		_, err := client.CheckConnectivity(ro[0].GetPrivate(), ro, 5*time.Second, true)
 		if err != nil {
 			return err
@@ -59,30 +54,14 @@ func (r statusSimulationRound) Execute(ctx context.Context, simio sim.IO) error 
 	return nil
 }
 
+func (r statusSimulationRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
+	return nil
+}
+
 func main() {
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
 	options := []sim.Option{
-		sim.WithFileMapper(
-			sim.FilesKey("private.toml"),
-			sim.FileMapper{
-				Path: "/root/.config/conode/private.toml",
-				Mapper: func(r io.Reader) (interface{}, error) {
-					hc := &app.CothorityConfig{}
-					_, err := toml.DecodeReader(r, hc)
-					if err != nil {
-						return nil, err
-					}
-
-					si, err := hc.GetServerIdentity()
-					if err != nil {
-						return nil, err
-					}
-
-					return si, nil
-				},
-			},
-		),
 		sim.WithImage(
 			"dedis/conode:latest",
 			[]string{"bash", "-c"},
@@ -103,4 +82,44 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func makeServerIdentity(cfg *app.CothorityConfig) (*network.ServerIdentity, error) {
+	si, err := cfg.GetServerIdentity()
+	if err != nil {
+		return nil, err
+	}
+
+	return si, nil
+}
+
+func readRoster(simio sim.IO, nodes []sim.NodeInfo) (*onet.Roster, error) {
+	identities := make([]*network.ServerIdentity, len(nodes))
+
+	for i, node := range nodes {
+		reader, err := simio.Read(node.Name, "/root/.config/conode/private.toml")
+		if err != nil {
+			return nil, err
+		}
+
+		hc := &app.CothorityConfig{}
+		_, err = toml.DecodeReader(reader, hc)
+		reader.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		si, err := makeServerIdentity(hc)
+		if err != nil {
+			return nil, err
+		}
+
+		si.Address = network.NewAddress(network.TLS, node.Address+":7770")
+
+		identities[i] = si
+	}
+
+	roster := onet.NewRoster(identities)
+
+	return roster, nil
 }

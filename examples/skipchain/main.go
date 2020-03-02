@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"os"
 	"time"
 
@@ -22,28 +20,15 @@ import (
 
 type skipchainSimulationRound struct{}
 
-func (r skipchainSimulationRound) Configure(simio sim.IO) error {
+func (r skipchainSimulationRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	return nil
 }
 
-func (r skipchainSimulationRound) Execute(ctx context.Context, simio sim.IO) error {
-	files := ctx.Value(sim.FilesKey("private.toml")).(sim.Files)
-	idents := make([]*network.ServerIdentity, len(files))
-
-	fmt.Println("\nRoster:")
-	for id, value := range files {
-		si := value.(*network.ServerIdentity)
-		si.Address = network.NewAddress(network.TLS, id.IP+":7770")
-		idents[id.Index] = si
-
-		fmt.Printf("%v\n", id)
-	}
-	fmt.Println("")
-
-	ro := onet.NewRoster(idents)
+func (r skipchainSimulationRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
+	roster, err := readRoster(simio, nodes)
 
 	client := skipchain.NewClient()
-	genesis, err := client.CreateGenesis(ro, 4, 32, skipchain.VerificationStandard, []byte("deadbeef"))
+	genesis, err := client.CreateGenesis(roster, 4, 32, skipchain.VerificationStandard, []byte("deadbeef"))
 	if err != nil {
 		return err
 	}
@@ -55,7 +40,7 @@ func (r skipchainSimulationRound) Execute(ctx context.Context, simio sim.IO) err
 
 	for i := 0; i < n; i++ {
 		binary.LittleEndian.PutUint64(data, uint64(i))
-		_, err := client.StoreSkipBlock(genesis, ro, data)
+		_, err := client.StoreSkipBlock(genesis, roster, data)
 		if err != nil {
 			return err
 		}
@@ -67,28 +52,12 @@ func (r skipchainSimulationRound) Execute(ctx context.Context, simio sim.IO) err
 	return nil
 }
 
+func (r skipchainSimulationRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
+	return nil
+}
+
 func main() {
 	options := []sim.Option{
-		sim.WithFileMapper(
-			sim.FilesKey("private.toml"),
-			sim.FileMapper{
-				Path: "/root/.config/conode/private.toml",
-				Mapper: func(r io.Reader) (interface{}, error) {
-					hc := &app.CothorityConfig{}
-					_, err := toml.DecodeReader(r, hc)
-					if err != nil {
-						return nil, err
-					}
-
-					si, err := hc.GetServerIdentity()
-					if err != nil {
-						return nil, err
-					}
-
-					return si, nil
-				},
-			},
-		),
 		sim.WithTopology(
 			net.NewAreaTopology(
 				&net.Area{N: 3, Latency: net.Delay{Value: 25 * time.Millisecond}},
@@ -116,4 +85,44 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func makeServerIdentity(cfg *app.CothorityConfig) (*network.ServerIdentity, error) {
+	si, err := cfg.GetServerIdentity()
+	if err != nil {
+		return nil, err
+	}
+
+	return si, nil
+}
+
+func readRoster(simio sim.IO, nodes []sim.NodeInfo) (*onet.Roster, error) {
+	identities := make([]*network.ServerIdentity, len(nodes))
+
+	for i, node := range nodes {
+		reader, err := simio.Read(node.Name, "/root/.config/conode/private.toml")
+		if err != nil {
+			return nil, err
+		}
+
+		hc := &app.CothorityConfig{}
+		_, err = toml.DecodeReader(reader, hc)
+		reader.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		si, err := makeServerIdentity(hc)
+		if err != nil {
+			return nil, err
+		}
+
+		si.Address = network.NewAddress(network.TLS, node.Address+":7770")
+
+		identities[i] = si
+	}
+
+	roster := onet.NewRoster(identities)
+
+	return roster, nil
 }
