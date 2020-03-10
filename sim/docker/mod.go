@@ -84,6 +84,7 @@ type Strategy struct {
 	stats      *metrics.Stats
 	statsLock  sync.Mutex
 	encoder    Encoder
+	vpn        VPN
 
 	// Depending on which step the simulation is booting, it is necessary
 	// to know if some states need to be loaded.
@@ -97,11 +98,14 @@ func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 		return nil, err
 	}
 
+	options := sim.NewOptions(opts)
+
 	return &Strategy{
 		out:        os.Stdout,
 		cli:        cli,
+		vpn:        newDockerOpenVPN(cli, options.OutputDir),
 		dio:        dockerio{cli: cli},
-		options:    sim.NewOptions(opts),
+		options:    options,
 		containers: make([]types.Container, 0),
 		stats: &metrics.Stats{
 			Nodes: make(map[string]metrics.NodeStats),
@@ -364,6 +368,11 @@ func (s *Strategy) Deploy(round sim.Round) error {
 		return fmt.Errorf("couldn't configure the containers: %w", err)
 	}
 
+	err = s.vpn.Deploy()
+	if err != nil {
+		return err
+	}
+
 	err = round.Before(s.dio, s.makeExecutionContext())
 	if err != nil {
 		return err
@@ -567,7 +576,12 @@ func (s *Strategy) Clean() error {
 	ctx := context.Background()
 	errs := []error{}
 
-	err := s.refreshContainers(ctx)
+	err := s.vpn.Clean()
+	if err != nil {
+		errs = append(errs, err)
+	}
+
+	err = s.refreshContainers(ctx)
 	if err != nil {
 		return fmt.Errorf("couldn't get running containers: %w", err)
 	}
