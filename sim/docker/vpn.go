@@ -38,10 +38,12 @@ type dockerOpenVPN struct {
 }
 
 func newDockerOpenVPN(cli client.APIClient, outDir string) dockerOpenVPN {
+	vpnOutDir := filepath.Join(outDir, "vpn")
+
 	return dockerOpenVPN{
-		outDir: filepath.Join(outDir, "vpn"),
+		outDir: vpnOutDir,
 		cli:    cli,
-		tun:    sim.NewDefaultTunnel(outDir),
+		tun:    sim.NewDefaultTunnel(vpnOutDir),
 	}
 }
 
@@ -115,7 +117,7 @@ func (vpn dockerOpenVPN) createRouterContainer(ctx context.Context) error {
 		PortBindings: nat.PortMap{
 			nat.Port("1194/udp"): []nat.PortBinding{
 				{
-					HostIP:   "127.0.01",
+					HostIP:   "127.0.0.1",
 					HostPort: "1194",
 				},
 			},
@@ -148,9 +150,9 @@ func (vpn dockerOpenVPN) createRouterContainer(ctx context.Context) error {
 
 func (vpn dockerOpenVPN) connect() error {
 	certs := sim.Certificates{
-		CA:   filepath.Join(vpn.outDir, "pki/ca.crt"),
-		Cert: filepath.Join(vpn.outDir, "pki/issued/client1.crt"),
-		Key:  filepath.Join(vpn.outDir, "pki/private/client1.key"),
+		CA:   filepath.Join(vpn.outDir, "pki", "ca.crt"),
+		Cert: filepath.Join(vpn.outDir, "pki", "issued", "client1.crt"),
+		Key:  filepath.Join(vpn.outDir, "pki", "private", "client1.key"),
 	}
 
 	err := vpn.tun.Start(sim.WithHost("127.0.0.1"), sim.WithPort(1194), sim.WithCertificate(certs))
