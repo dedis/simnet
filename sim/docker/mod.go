@@ -103,7 +103,7 @@ func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 	return &Strategy{
 		out:        os.Stdout,
 		cli:        cli,
-		vpn:        newDockerOpenVPN(cli, options.OutputDir),
+		vpn:        newDockerOpenVPN(cli, os.Stdout, options.OutputDir),
 		dio:        dockerio{cli: cli},
 		options:    options,
 		containers: make([]types.Container, 0),
@@ -137,18 +137,18 @@ func (s *Strategy) refreshContainers(ctx context.Context) error {
 	return nil
 }
 
-func (s *Strategy) waitImagePull(reader io.Reader) error {
+func waitImagePull(reader io.Reader, out io.Writer) error {
 	dec := json.NewDecoder(reader)
 	evt := Event{}
 	for {
 		err := dec.Decode(&evt)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				fmt.Fprintln(s.out, goterm.ResetLine("Pull image... Done."))
+				fmt.Fprintln(out, goterm.ResetLine("Pull image... Done."))
 				return nil
 			}
 
-			fmt.Fprintln(s.out, goterm.ResetLine("Pull image... Failed."))
+			fmt.Fprintln(out, goterm.ResetLine("Pull image... Failed."))
 			return fmt.Errorf("couldn't decode the event: %w", err)
 		}
 
@@ -157,21 +157,21 @@ func (s *Strategy) waitImagePull(reader io.Reader) error {
 			return fmt.Errorf("stream error: %s", evt.Error)
 		}
 
-		fmt.Fprintf(s.out, goterm.ResetLine("Pull image... %s %s"), evt.Status, evt.Progress)
+		fmt.Fprintf(out, goterm.ResetLine("Pull image... %s %s"), evt.Status, evt.Progress)
 	}
 }
 
-func (s *Strategy) pullImage(ctx context.Context) error {
-	ref := fmt.Sprintf("%s/%s", ImageBaseURL, s.options.Image)
+func pullImage(ctx context.Context, cli client.APIClient, image string, out io.Writer) error {
+	ref := fmt.Sprintf("%s/%s", ImageBaseURL, image)
 
-	reader, err := s.cli.ImagePull(ctx, ref, types.ImagePullOptions{})
+	reader, err := cli.ImagePull(ctx, ref, types.ImagePullOptions{})
 	if err != nil {
 		return err
 	}
 
 	defer reader.Close()
 
-	err = s.waitImagePull(reader)
+	err = waitImagePull(reader, out)
 	if err != nil {
 		return fmt.Errorf("couldn't complete pull: %w", err)
 	}
@@ -306,7 +306,7 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 
 	defer reader.Close()
 
-	err = s.waitImagePull(reader)
+	err = waitImagePull(reader, s.out)
 	if err != nil {
 		return fmt.Errorf("couldn't complete pull: %w", err)
 	}
@@ -350,7 +350,7 @@ func (s *Strategy) Deploy(round sim.Round) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := s.pullImage(ctx)
+	err := pullImage(ctx, s.cli, s.options.Image, s.out)
 	if err != nil {
 		return fmt.Errorf("couldn't pull the image: %w", err)
 	}
