@@ -31,6 +31,8 @@ type testStrategy struct {
 	errClean   error
 }
 
+func (e *testStrategy) Option(sim.Option) {}
+
 func (e *testStrategy) Deploy(sim.Round) error {
 	if e.errDeploy != nil {
 		return e.errDeploy

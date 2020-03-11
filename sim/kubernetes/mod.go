@@ -89,6 +89,11 @@ func NewStrategy(cfg string, opts ...sim.Option) (*Strategy, error) {
 	}, nil
 }
 
+// Option sets the global options.
+func (s *Strategy) Option(opt sim.Option) {
+	opt(s.options)
+}
+
 // Deploy will create a deployment on the Kubernetes cluster. A pod will then
 // be assigned to simulation nodes.
 func (s *Strategy) Deploy(round sim.Round) error {
@@ -135,6 +140,7 @@ func (s *Strategy) Deploy(round sim.Round) error {
 		sim.WithPort(port.NodePort),
 		sim.WithHost(host),
 		sim.WithCertificate(certificates),
+		sim.WithCommand(s.options.VPNExecutable),
 	)
 	if err != nil {
 		return err

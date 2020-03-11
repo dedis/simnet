@@ -13,6 +13,7 @@ import (
 var doCleaning bool
 var doDeploy bool
 var doExecute bool
+var vpnCommand string
 
 var errMissingArgs = errors.New("expect at least one argument")
 
@@ -42,12 +43,16 @@ func (s *Simulation) Run(args []string) error {
 	flagset.BoolVar(&doCleaning, "do-clean", false, "override the usual flow to only wipe simulation resources")
 	flagset.BoolVar(&doDeploy, "do-deploy", false, "override the usual flow to only deploy simulation resources")
 	flagset.BoolVar(&doExecute, "do-execute", false, "override the usual flow to only run the simulation round")
+	flagset.StringVar(&vpnCommand, "vpn", defaultOpenVPNPath, "path to the OpenVPN executable")
 
 	flagset.Parse(args[1:])
 
 	doAll := !doCleaning && !doDeploy && !doExecute
 
 	fmt.Fprintf(s.out, "Using strategy %v\n", s.strategy)
+
+	// Set global options to the strategy.
+	s.strategy.Option(sim.WithVPN(vpnCommand))
 
 	if doCleaning || doAll {
 		defer func() {

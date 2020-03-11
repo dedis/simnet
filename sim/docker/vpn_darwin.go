@@ -25,20 +25,22 @@ const (
 // dockerOpenVPN is the VPN implementation for Darwin based systems so that it
 // creates a tunnel between the host and the guest Docker VM.
 type dockerOpenVPN struct {
-	out    io.Writer
-	outDir string
-	cli    client.APIClient
-	tun    sim.Tunnel
+	out     io.Writer
+	outDir  string
+	cli     client.APIClient
+	tun     sim.Tunnel
+	options *sim.Options
 }
 
-func newDockerOpenVPN(cli client.APIClient, out io.Writer, outDir string) dockerOpenVPN {
-	vpnOutDir := filepath.Join(outDir, "vpn")
+func newDockerOpenVPN(cli client.APIClient, out io.Writer, options *sim.Options) dockerOpenVPN {
+	vpnOutDir := filepath.Join(options.OutputDir, "vpn")
 
 	return dockerOpenVPN{
-		out:    out,
-		outDir: vpnOutDir,
-		cli:    cli,
-		tun:    sim.NewDefaultTunnel(vpnOutDir),
+		out:     out,
+		outDir:  vpnOutDir,
+		cli:     cli,
+		tun:     sim.NewDefaultTunnel(vpnOutDir),
+		options: options,
 	}
 }
 
@@ -157,7 +159,12 @@ func (vpn dockerOpenVPN) connect() error {
 		Key:  filepath.Join(vpn.outDir, "pki", "private", "client1.key"),
 	}
 
-	err := vpn.tun.Start(sim.WithHost("127.0.0.1"), sim.WithPort(1194), sim.WithCertificate(certs))
+	err := vpn.tun.Start(
+		sim.WithHost("127.0.0.1"),
+		sim.WithPort(1194),
+		sim.WithCertificate(certs),
+		sim.WithCommand(vpn.options.VPNExecutable),
+	)
 	if err != nil {
 		return err
 	}

@@ -52,6 +52,7 @@ type Certificates struct {
 
 // TunOptions contains the data that will be used to start the vpn.
 type TunOptions struct {
+	Cmd          string
 	Host         string
 	Port         int32
 	Certificates Certificates
@@ -59,6 +60,13 @@ type TunOptions struct {
 
 // TunOption is a function that transforms the vpn options.
 type TunOption func(opts *TunOptions)
+
+// WithCommand updates the options to use a different executable.
+func WithCommand(cmd string) TunOption {
+	return func(opts *TunOptions) {
+		opts.Cmd = cmd
+	}
+}
 
 // WithHost updates the options to include the hostname of the distant vpn.
 func WithHost(host string) TunOption {
@@ -104,7 +112,7 @@ func NewDefaultTunnel(output string) *DefaultTunnel {
 // Start runs the openvpn process and returns any error that could happen before
 // the tunnel is setup.
 func (v *DefaultTunnel) Start(opts ...TunOption) error {
-	options := &TunOptions{}
+	options := &TunOptions{Cmd: "openvpn"}
 	for _, fn := range opts {
 		fn(options)
 	}
@@ -122,7 +130,7 @@ func (v *DefaultTunnel) Start(opts ...TunOption) error {
 	}
 
 	args := []string{
-		"openvpn",
+		options.Cmd,
 		"--client",
 		"--dev",
 		"tun",
@@ -161,7 +169,7 @@ func (v *DefaultTunnel) Start(opts ...TunOption) error {
 
 	err = cmd.Run()
 	if err != nil {
-		fmt.Printf("Error: %+v\n", err)
+		fmt.Printf("Command 'sudo %s' returns error: %s", options.Cmd, err)
 		return fmt.Errorf("vpn initialization failed: see %s", filepath.Join(v.outDir, LogFileName))
 	}
 

@@ -77,6 +77,12 @@ func TestStrategy_NewFailures(t *testing.T) {
 	require.Contains(t, err.Error(), "couldn't create the data folder")
 }
 
+func TestStrategy_Option(t *testing.T) {
+	stry := &Strategy{options: sim.NewOptions(nil)}
+	stry.Option(sim.WithVPN("abc"))
+	require.Equal(t, stry.options.VPNExecutable, "abc")
+}
+
 func TestStrategy_DeployWithFailures(t *testing.T) {
 	deployer := &testEngine{}
 	stry := &Strategy{
