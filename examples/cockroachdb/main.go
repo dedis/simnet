@@ -80,8 +80,6 @@ func main() {
 			"cockroachdb/cockroach:v19.2.2",
 			nil,
 			[]string{"start", "--insecure", "--join=node0,node1,node2"},
-			sim.NewTCP(26257),
-			sim.NewTCP(8080),
 		),
 	}
 
