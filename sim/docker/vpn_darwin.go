@@ -1,10 +1,7 @@
-// +build darwin
-
 package docker
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"path/filepath"
 	"time"
@@ -13,7 +10,6 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/strslice"
-	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"go.dedis.ch/simnet/sim"
@@ -22,7 +18,6 @@ import (
 const (
 	routerContainerName   = "simnet-router"
 	initContainerName     = "simnet-router-init"
-	volumeName            = "simnet-router-volume"
 	simnetRouterImage     = "dedis/simnet-router"
 	simnetRouterInitImage = "dedis/simnet-router-init"
 )
@@ -48,28 +43,34 @@ func newDockerOpenVPN(cli client.APIClient, out io.Writer, outDir string) docker
 }
 
 func (vpn dockerOpenVPN) Deploy() error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
 
+	// Get the image for the router container.
 	err := pullImage(ctx, vpn.cli, simnetRouterImage, vpn.out)
 	if err != nil {
 		return err
 	}
 
+	// Get the image for the initialization container.
 	err = pullImage(ctx, vpn.cli, simnetRouterInitImage, vpn.out)
 	if err != nil {
 		return err
 	}
 
-	err = vpn.createVolume(ctx)
+	// Run the init container to generate the certificates.
+	err = vpn.generateCerts(ctx)
 	if err != nil {
 		return err
 	}
 
+	// Deploy the router.
 	err = vpn.createRouterContainer(ctx)
 	if err != nil {
 		return err
 	}
 
+	// Open a connection to the VPN.
 	err = vpn.connect()
 	if err != nil {
 		return err
@@ -78,14 +79,7 @@ func (vpn dockerOpenVPN) Deploy() error {
 	return nil
 }
 
-func (vpn dockerOpenVPN) createVolume(ctx context.Context) error {
-	vol, err := vpn.cli.VolumeCreate(ctx, volume.VolumesCreateBody{Name: volumeName})
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Volume created: %s\n", vol.Name)
-
+func (vpn dockerOpenVPN) generateCerts(ctx context.Context) error {
 	hcfg := &container.HostConfig{
 		AutoRemove: true,
 		Mounts: []mount.Mount{
@@ -134,8 +128,6 @@ func (vpn dockerOpenVPN) createRouterContainer(ctx context.Context) error {
 		},
 		Mounts: []mount.Mount{
 			{
-				// Type:   mount.TypeVolume,
-				// Source: volumeName,
 				Type:   mount.TypeBind,
 				Source: vpn.outDir,
 				Target: "/etc/openvpn",
@@ -177,25 +169,18 @@ func (vpn dockerOpenVPN) Clean() error {
 	ctx := context.Background()
 
 	timeout := 10 * time.Second
+	errs := make([]error, 0)
 
 	if vpn.tun != nil {
 		err := vpn.tun.Stop()
 		if err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
 
 	err := vpn.cli.ContainerStop(ctx, routerContainerName, &timeout)
 	if err != nil {
-		return err
-	}
-
-	// TODO: better
-	time.Sleep(2 * time.Second)
-
-	err = vpn.cli.VolumeRemove(ctx, volumeName, true)
-	if err != nil {
-		return err
+		errs = append(errs, err)
 	}
 
 	return nil

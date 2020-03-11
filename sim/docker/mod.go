@@ -137,14 +137,15 @@ func (s *Strategy) refreshContainers(ctx context.Context) error {
 	return nil
 }
 
-func waitImagePull(reader io.Reader, out io.Writer) error {
+func waitImagePull(reader io.Reader, image string, out io.Writer) error {
 	dec := json.NewDecoder(reader)
 	evt := Event{}
 	for {
 		err := dec.Decode(&evt)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				fmt.Fprintln(out, goterm.ResetLine("Pull image... Done."))
+				fmt.Fprintf(out, goterm.ResetLine("Pull image %s... Done."), image)
+				fmt.Fprintln(out, "")
 				return nil
 			}
 
@@ -171,7 +172,7 @@ func pullImage(ctx context.Context, cli client.APIClient, image string, out io.W
 
 	defer reader.Close()
 
-	err = waitImagePull(reader, out)
+	err = waitImagePull(reader, image, out)
 	if err != nil {
 		return fmt.Errorf("couldn't complete pull: %w", err)
 	}
@@ -306,7 +307,7 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 
 	defer reader.Close()
 
-	err = waitImagePull(reader, s.out)
+	err = waitImagePull(reader, ref, s.out)
 	if err != nil {
 		return fmt.Errorf("couldn't complete pull: %w", err)
 	}
