@@ -40,6 +40,14 @@ func TestStrategy_New(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestStrategy_Option(t *testing.T) {
+	s, clean := newTestStrategy(t)
+	defer clean()
+
+	s.Option(sim.WithVPN("abc"))
+	require.Equal(t, s.options.VPNExecutable, "abc")
+}
+
 func TestStrategy_Deploy(t *testing.T) {
 	n := 3
 	client := &testClient{numContainers: n}
@@ -142,6 +150,15 @@ func TestStrategy_RoundConfigureFailure(t *testing.T) {
 	err := s.Deploy(&testRound{errBefore: e})
 	require.Error(t, err)
 	require.Equal(t, err, e)
+}
+
+func TestStrategy_DeployVPNError(t *testing.T) {
+	s, clean := newTestStrategy(t)
+	defer clean()
+
+	s.vpn = fakeVPN{err: errors.New("oops")}
+	err := s.Deploy(&testRound{})
+	require.EqualError(t, err, "couldn't deply the vpn: oops")
 }
 
 func TestStrategy_PullImageFailures(t *testing.T) {
@@ -494,8 +511,12 @@ func TestStrategy_CleanFailures(t *testing.T) {
 	s, clean := newTestStrategyWithClient(t, client)
 	defer clean()
 
-	client.errContainerList = errors.New("container list error")
+	s.vpn = fakeVPN{err: errors.New("oops")}
 	err := s.Clean()
+	require.EqualError(t, err, "couldn't remove the containers: [vpn: oops]")
+
+	client.errContainerList = errors.New("container list error")
+	err = s.Clean()
 	require.Error(t, err)
 	require.True(t, errors.Is(err, client.errContainerList), err.Error())
 
@@ -795,14 +816,16 @@ var (
 	testArgs = []string{"arg1"}
 )
 
-type fakeVPN struct{}
+type fakeVPN struct {
+	err error
+}
 
 func (vpn fakeVPN) Deploy() error {
-	return nil
+	return vpn.err
 }
 
 func (vpn fakeVPN) Clean() error {
-	return nil
+	return vpn.err
 }
 
 func newTestStrategy(t *testing.T) (*Strategy, func()) {

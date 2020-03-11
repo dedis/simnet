@@ -54,6 +54,8 @@ type Round interface {
 // deployment, to the execution of the simulation round and finally the
 // cleaning.
 type Strategy interface {
+	Option(Option)
+
 	// Deploy takes care of deploying the application according to the
 	// topology. The simulation should be able to run after it returns
 	// with no error.

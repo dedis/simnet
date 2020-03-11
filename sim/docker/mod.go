@@ -103,7 +103,7 @@ func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 	return &Strategy{
 		out:        os.Stdout,
 		cli:        cli,
-		vpn:        newDockerOpenVPN(cli, os.Stdout, options.OutputDir),
+		vpn:        newDockerOpenVPN(cli, os.Stdout, options),
 		dio:        dockerio{cli: cli},
 		options:    options,
 		containers: make([]types.Container, 0),
@@ -112,6 +112,11 @@ func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 		},
 		encoder: jsonEncoder,
 	}, nil
+}
+
+// Option allows to change the options defined at the creation of the strategy.
+func (s *Strategy) Option(opt sim.Option) {
+	opt(s.options)
 }
 
 // Get the list of containers running in the Docker environment that are in
@@ -371,7 +376,7 @@ func (s *Strategy) Deploy(round sim.Round) error {
 
 	err = s.vpn.Deploy()
 	if err != nil {
-		return err
+		return fmt.Errorf("couldn't deply the vpn: %v", err)
 	}
 
 	err = round.Before(s.dio, s.makeExecutionContext())
@@ -579,7 +584,7 @@ func (s *Strategy) Clean() error {
 
 	err := s.vpn.Clean()
 	if err != nil {
-		errs = append(errs, err)
+		errs = append(errs, fmt.Errorf("vpn: %v", err))
 	}
 
 	err = s.refreshContainers(ctx)

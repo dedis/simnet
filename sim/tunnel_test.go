@@ -44,8 +44,14 @@ func TestTunnel_Start(t *testing.T) {
 
 	certs := Certificates{}
 
-	err = tun.Start(WithPort(1234), WithHost("1.2.3.4"), WithCertificate(certs))
+	err = tun.Start(
+		WithPort(1234),
+		WithHost("1.2.3.4"),
+		WithCertificate(certs),
+		WithCommand("abc"),
+	)
 	require.NoError(t, err)
+	require.Contains(t, tun.cmd.Args, "abc")
 	require.Contains(t, tun.cmd.Args, "1234")
 	require.Contains(t, tun.cmd.Args, "1.2.3.4")
 }

@@ -72,3 +72,9 @@ func TestOption_Image(t *testing.T) {
 
 	require.Equal(t, "library/nginx", options.Image)
 }
+
+func TestOption_VPN(t *testing.T) {
+	options := NewOptions([]Option{WithVPN("abc")})
+
+	require.Equal(t, options.VPNExecutable, "abc")
+}

@@ -13,17 +13,20 @@ var userHomeDir = os.UserHomeDir
 
 // Options contains the different options for a simulation execution.
 type Options struct {
-	OutputDir string
-	Topology  network.Topology
-	Image     string
-	Cmd       []string
-	Args      []string
-	Ports     []Port
+	OutputDir     string
+	Topology      network.Topology
+	Image         string
+	Cmd           []string
+	Args          []string
+	Ports         []Port
+	VPNExecutable string
 }
 
 // NewOptions creates empty options.
 func NewOptions(opts []Option) *Options {
-	o := &Options{}
+	o := &Options{
+		VPNExecutable: "openvpn",
+	}
 
 	for _, f := range opts {
 		f(o)
@@ -49,6 +52,13 @@ func NewOptions(opts []Option) *Options {
 
 // Option is a function that changes the global options.
 type Option func(opts *Options)
+
+// WithVPN is an option to change the default vpn executable path.
+func WithVPN(exec string) Option {
+	return func(opts *Options) {
+		opts.VPNExecutable = exec
+	}
+}
 
 // WithOutput is an option to change the default directory that will be used
 // to write data about the simulation.
