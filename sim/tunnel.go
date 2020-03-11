@@ -161,6 +161,7 @@ func (v *DefaultTunnel) Start(opts ...TunOption) error {
 
 	err = cmd.Run()
 	if err != nil {
+		fmt.Printf("Error: %+v\n", err)
 		return fmt.Errorf("vpn initialization failed: see %s", filepath.Join(v.outDir, LogFileName))
 	}
 

@@ -5,12 +5,11 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"path/filepath"
 
 	"go.dedis.ch/simnet"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
-	"go.dedis.ch/simnet/sim/kubernetes"
+	"go.dedis.ch/simnet/sim/docker"
 )
 
 type simRound struct{}
@@ -53,10 +52,10 @@ func main() {
 		sim.WithImage("nginx", nil, nil, sim.NewTCP(80)),
 	}
 
-	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	// kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
-	engine, err := kubernetes.NewStrategy(kubeconfig, options...)
-	// engine, err := docker.NewStrategy(options...)
+	// engine, err := kubernetes.NewStrategy(kubeconfig, options...)
+	engine, err := docker.NewStrategy(options...)
 	if err != nil {
 		panic(err)
 	}

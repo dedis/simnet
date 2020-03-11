@@ -164,7 +164,7 @@ func TestStrategy_PullImageFailures(t *testing.T) {
 	strerr := "stream error"
 	require.NoError(t, enc.Encode(&Event{Error: strerr}))
 
-	err = s.pullImage(context.Background())
+	err = pullImage(context.Background(), s.cli, "", ioutil.Discard)
 	require.Error(t, err)
 	require.EqualError(t, errors.Unwrap(err), fmt.Sprintf("stream error: %s", strerr))
 
@@ -172,7 +172,7 @@ func TestStrategy_PullImageFailures(t *testing.T) {
 	client.bufferPullImage.Reset()
 	client.bufferPullImage.Write([]byte("invalid event"))
 
-	err = s.pullImage(context.Background())
+	err = pullImage(context.Background(), s.cli, "", ioutil.Discard)
 	require.Error(t, err)
 	require.EqualError(t, errors.Unwrap(errors.Unwrap(err)), "invalid character 'i' looking for beginning of value")
 }
@@ -795,6 +795,16 @@ var (
 	testArgs = []string{"arg1"}
 )
 
+type fakeVPN struct{}
+
+func (vpn fakeVPN) Deploy() error {
+	return nil
+}
+
+func (vpn fakeVPN) Clean() error {
+	return nil
+}
+
 func newTestStrategy(t *testing.T) (*Strategy, func()) {
 	out, err := ioutil.TempDir(os.TempDir(), "simnet-docker-test")
 	require.NoError(t, err)
@@ -807,6 +817,7 @@ func newTestStrategy(t *testing.T) (*Strategy, func()) {
 
 	return &Strategy{
 		cli: client,
+		vpn: fakeVPN{},
 		dio: testDockerIO{},
 		out: ioutil.Discard,
 		options: sim.NewOptions([]sim.Option{

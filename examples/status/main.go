@@ -66,7 +66,8 @@ func main() {
 			"dedis/conode:latest",
 			[]string{"bash", "-c"},
 			[]string{"/root/conode setup --non-interactive --port 7770 && /root/conode -d 2 server"},
-			sim.NewTCP(7770),
+			// The port needs to be published so that we can send a message to a node to start
+			// the simulation.
 			sim.NewTCP(7771),
 		),
 	}

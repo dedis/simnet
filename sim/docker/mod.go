@@ -84,6 +84,7 @@ type Strategy struct {
 	stats      *metrics.Stats
 	statsLock  sync.Mutex
 	encoder    Encoder
+	vpn        VPN
 
 	// Depending on which step the simulation is booting, it is necessary
 	// to know if some states need to be loaded.
@@ -97,11 +98,14 @@ func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 		return nil, err
 	}
 
+	options := sim.NewOptions(opts)
+
 	return &Strategy{
 		out:        os.Stdout,
 		cli:        cli,
+		vpn:        newDockerOpenVPN(cli, os.Stdout, options.OutputDir),
 		dio:        dockerio{cli: cli},
-		options:    sim.NewOptions(opts),
+		options:    options,
 		containers: make([]types.Container, 0),
 		stats: &metrics.Stats{
 			Nodes: make(map[string]metrics.NodeStats),
@@ -133,18 +137,19 @@ func (s *Strategy) refreshContainers(ctx context.Context) error {
 	return nil
 }
 
-func (s *Strategy) waitImagePull(reader io.Reader) error {
+func waitImagePull(reader io.Reader, image string, out io.Writer) error {
 	dec := json.NewDecoder(reader)
 	evt := Event{}
 	for {
 		err := dec.Decode(&evt)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				fmt.Fprintln(s.out, goterm.ResetLine("Pull image... Done."))
+				fmt.Fprintf(out, goterm.ResetLine("Pull image %s... Done."), image)
+				fmt.Fprintln(out, "")
 				return nil
 			}
 
-			fmt.Fprintln(s.out, goterm.ResetLine("Pull image... Failed."))
+			fmt.Fprintln(out, goterm.ResetLine("Pull image... Failed."))
 			return fmt.Errorf("couldn't decode the event: %w", err)
 		}
 
@@ -153,21 +158,21 @@ func (s *Strategy) waitImagePull(reader io.Reader) error {
 			return fmt.Errorf("stream error: %s", evt.Error)
 		}
 
-		fmt.Fprintf(s.out, goterm.ResetLine("Pull image... %s %s"), evt.Status, evt.Progress)
+		fmt.Fprintf(out, goterm.ResetLine("Pull image... %s %s"), evt.Status, evt.Progress)
 	}
 }
 
-func (s *Strategy) pullImage(ctx context.Context) error {
-	ref := fmt.Sprintf("%s/%s", ImageBaseURL, s.options.Image)
+func pullImage(ctx context.Context, cli client.APIClient, image string, out io.Writer) error {
+	ref := fmt.Sprintf("%s/%s", ImageBaseURL, image)
 
-	reader, err := s.cli.ImagePull(ctx, ref, types.ImagePullOptions{})
+	reader, err := cli.ImagePull(ctx, ref, types.ImagePullOptions{})
 	if err != nil {
 		return err
 	}
 
 	defer reader.Close()
 
-	err = s.waitImagePull(reader)
+	err = waitImagePull(reader, image, out)
 	if err != nil {
 		return fmt.Errorf("couldn't complete pull: %w", err)
 	}
@@ -302,7 +307,7 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 
 	defer reader.Close()
 
-	err = s.waitImagePull(reader)
+	err = waitImagePull(reader, ref, s.out)
 	if err != nil {
 		return fmt.Errorf("couldn't complete pull: %w", err)
 	}
@@ -346,7 +351,7 @@ func (s *Strategy) Deploy(round sim.Round) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := s.pullImage(ctx)
+	err := pullImage(ctx, s.cli, s.options.Image, s.out)
 	if err != nil {
 		return fmt.Errorf("couldn't pull the image: %w", err)
 	}
@@ -362,6 +367,11 @@ func (s *Strategy) Deploy(round sim.Round) error {
 	err = s.configureContainers(ctx)
 	if err != nil {
 		return fmt.Errorf("couldn't configure the containers: %w", err)
+	}
+
+	err = s.vpn.Deploy()
+	if err != nil {
+		return err
 	}
 
 	err = round.Before(s.dio, s.makeExecutionContext())
@@ -567,7 +577,12 @@ func (s *Strategy) Clean() error {
 	ctx := context.Background()
 	errs := []error{}
 
-	err := s.refreshContainers(ctx)
+	err := s.vpn.Clean()
+	if err != nil {
+		errs = append(errs, err)
+	}
+
+	err = s.refreshContainers(ctx)
 	if err != nil {
 		return fmt.Errorf("couldn't get running containers: %w", err)
 	}

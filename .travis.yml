@@ -1,15 +1,25 @@
 language: go
-
 go:
     - 1.13
 
-before_install:
-    - go get github.com/mattn/goveralls
-    - go mod download
+jobs:
+    include:
+        - stage: test
+          os: linux
 
-script:
-    - go test -covermode=count -coverprofile=coverage.out ./...
-    - $GOPATH/bin/goveralls -service=travis-ci -coverprofile=coverage.out
+          before_install:
+            - go get github.com/mattn/goveralls
+            - go mod download
+
+          script:
+            - go test -covermode=count -coverprofile=coverage.out ./...
+            - $GOPATH/bin/goveralls -service=travis-ci -coverprofile=coverage.out
+        - os: osx
+          before_install:
+            - go mod download
+
+          script:
+            - go test ./...
 
 notifications:
     email: false
