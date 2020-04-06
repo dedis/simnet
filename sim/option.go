@@ -11,6 +11,25 @@ import (
 
 var userHomeDir = os.UserHomeDir
 
+const (
+	// KB is 2³ bytes.
+	KB = int64(1) << 10
+	// MB is 2⁶ bytes.
+	MB = KB << 10
+	// GB is 2⁹ bytes.
+	GB = MB << 10
+	// TB is 2¹² bytes.
+	TB = GB << 10
+	// PB is 2¹⁶ bytes.
+	PB = TB << 10
+)
+
+// TmpVolume stores the information about a tmpfs mount.
+type TmpVolume struct {
+	Destination string
+	Size        int64
+}
+
 // Options contains the different options for a simulation execution.
 type Options struct {
 	OutputDir     string
@@ -19,6 +38,7 @@ type Options struct {
 	Cmd           []string
 	Args          []string
 	Ports         []Port
+	TmpFS         []TmpVolume
 	VPNExecutable string
 }
 
@@ -150,5 +170,16 @@ func WithImage(image string, cmd, args []string, ports ...Port) Option {
 		opts.Cmd = cmd
 		opts.Args = args
 		opts.Ports = ports
+	}
+}
+
+// WithTmpFS is an option for simulation engines to mount a tmpfs at the given
+// destination.
+func WithTmpFS(destination string, size int64) Option {
+	return func(opts *Options) {
+		opts.TmpFS = append(opts.TmpFS, TmpVolume{
+			Destination: destination,
+			Size:        size,
+		})
 	}
 }

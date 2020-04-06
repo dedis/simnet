@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"go.dedis.ch/simnet/daemon"
@@ -194,6 +195,16 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 
 	hcfg := &container.HostConfig{
 		AutoRemove: true,
+	}
+
+	for _, volume := range s.options.TmpFS {
+		hcfg.Mounts = append(hcfg.Mounts, mount.Mount{
+			Type:   mount.TypeTmpfs,
+			Target: volume.Destination,
+			TmpfsOptions: &mount.TmpfsOptions{
+				SizeBytes: volume.Size,
+			},
+		})
 	}
 
 	for _, node := range s.options.Topology.GetNodes() {
