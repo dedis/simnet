@@ -78,3 +78,10 @@ func TestOption_VPN(t *testing.T) {
 
 	require.Equal(t, options.VPNExecutable, "abc")
 }
+
+func TestOption_TmpFS(t *testing.T) {
+	options := NewOptions([]Option{WithTmpFS("/abc", 2*GB)})
+
+	require.Len(t, options.TmpFS, 1)
+	require.Equal(t, options.TmpFS[0].Destination, "/abc")
+}

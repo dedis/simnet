@@ -50,6 +50,8 @@ func main() {
 			network.NewSimpleTopology(3, 25),
 		),
 		sim.WithImage("nginx", nil, nil, sim.NewTCP(80)),
+		// Example of a mount of type tmpfs.
+		sim.WithTmpFS("/storage", 256*sim.MB),
 	}
 
 	// kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")

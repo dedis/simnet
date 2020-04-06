@@ -88,6 +88,9 @@ func TestStrategy_Deploy(t *testing.T) {
 		require.True(t, ok)
 		_, ok = call.cfg.ExposedPorts[nat.Port("2000/udp")]
 		require.False(t, ok)
+
+		require.Len(t, call.hcfg.Mounts, 1)
+		require.Equal(t, call.hcfg.Mounts[0].Target, "/storage")
 	}
 
 	for i, call := range client.callsContainerCreate[n:] {
@@ -853,6 +856,7 @@ func newTestStrategy(t *testing.T) (*Strategy, func()) {
 				sim.NewTCP(2000),
 				sim.NewUDP(2001),
 			),
+			sim.WithTmpFS("/storage", 2*sim.GB),
 		}),
 		containers: make([]types.Container, 0),
 		stats: &metrics.Stats{
