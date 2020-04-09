@@ -2,11 +2,11 @@ package kubernetes
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 
 	"go.dedis.ch/simnet/sim"
+	"golang.org/x/xerrors"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -50,7 +50,7 @@ func (k kio) Read(pod, container, path string) (io.ReadCloser, error) {
 
 	exec, err := newExecutor(k.config, "POST", req.URL())
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("couldn't make executor: %v", err)
 	}
 
 	go func() {
@@ -75,8 +75,11 @@ func (k kio) Read(pod, container, path string) (io.ReadCloser, error) {
 		})
 
 		if err != nil {
-			// Replace the generic command error message by a better message.
-			err = errors.New(outErr.String())
+			if outErr.Len() > 0 {
+				err = xerrors.Errorf("command stderr: %s", outErr.String())
+			} else {
+				err = xerrors.Errorf("command error: %v", err)
+			}
 		}
 	}()
 

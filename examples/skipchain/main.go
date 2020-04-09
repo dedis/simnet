@@ -16,6 +16,7 @@ import (
 	net "go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
 	"go.dedis.ch/simnet/sim/docker"
+	"golang.org/x/xerrors"
 )
 
 type skipchainSimulationRound struct{}
@@ -26,11 +27,14 @@ func (r skipchainSimulationRound) Before(simio sim.IO, nodes []sim.NodeInfo) err
 
 func (r skipchainSimulationRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	roster, err := readRoster(simio, nodes)
+	if err != nil {
+		return xerrors.Errorf("couldn't read roster: %v", err)
+	}
 
 	client := skipchain.NewClient()
 	genesis, err := client.CreateGenesis(roster, 4, 32, skipchain.VerificationStandard, []byte("deadbeef"))
 	if err != nil {
-		return err
+		return xerrors.Errorf("couldn't create genesis: %v", err)
 	}
 
 	fmt.Printf("Genesis block %x created.\n", genesis.Hash)
@@ -42,7 +46,7 @@ func (r skipchainSimulationRound) Execute(simio sim.IO, nodes []sim.NodeInfo) er
 		binary.LittleEndian.PutUint64(data, uint64(i))
 		_, err := client.StoreSkipBlock(genesis, roster, data)
 		if err != nil {
-			return err
+			return xerrors.Errorf("couldn't store block: %v", err)
 		}
 
 		fmt.Printf(goterm.ResetLine("Block [%d/%d] created"), i+1, n)

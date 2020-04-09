@@ -15,6 +15,7 @@ import (
 	"go.dedis.ch/simnet"
 	"go.dedis.ch/simnet/sim"
 	"go.dedis.ch/simnet/sim/kubernetes"
+	"golang.org/x/xerrors"
 )
 
 // StatusSimulationRound contacts each node of the simulation network and asks
@@ -29,7 +30,7 @@ func (r statusSimulationRound) Before(simio sim.IO, nodes []sim.NodeInfo) error 
 func (r statusSimulationRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	roster, err := readRoster(simio, nodes)
 	if err != nil {
-		return err
+		return xerrors.Errorf("couldn't read the roster: %v", err)
 	}
 
 	fmt.Print("Checking connectivity...")
@@ -44,7 +45,7 @@ func (r statusSimulationRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error
 		fmt.Printf(goterm.ResetLine("Checking connectivity... [%d/%d]"), i+1, len(roster.List))
 		_, err := client.CheckConnectivity(ro[0].GetPrivate(), ro, 5*time.Second, true)
 		if err != nil {
-			return err
+			return xerrors.Errorf("couldn't check connectivity: %v", err)
 		}
 
 		time.Sleep(1 * time.Second)
@@ -100,19 +101,19 @@ func readRoster(simio sim.IO, nodes []sim.NodeInfo) (*onet.Roster, error) {
 	for i, node := range nodes {
 		reader, err := simio.Read(node.Name, "/root/.config/conode/private.toml")
 		if err != nil {
-			return nil, err
+			return nil, xerrors.Errorf("couldn't read file: %v", err)
 		}
 
 		hc := &app.CothorityConfig{}
 		_, err = toml.DecodeReader(reader, hc)
 		reader.Close()
 		if err != nil {
-			return nil, err
+			return nil, xerrors.Errorf("couldn't decode config: %v", err)
 		}
 
 		si, err := makeServerIdentity(hc)
 		if err != nil {
-			return nil, err
+			return nil, xerrors.Errorf("couldn't make identity: %v", err)
 		}
 
 		si.Address = network.NewAddress(network.TLS, node.Address+":7770")

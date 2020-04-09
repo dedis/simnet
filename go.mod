@@ -18,6 +18,7 @@ require (
 	golang.org/x/oauth2 v0.0.0-20191122200657-5d9234df094c // indirect
 	golang.org/x/sys v0.0.0-20191127021746-63cb32ae39b2 // indirect
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
+	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
 	gonum.org/v1/netlib v0.0.0-20190331212654-76723241ea4e // indirect
 	gonum.org/v1/plot v0.0.0-20191107103940-ca91d9d40d0a
 	k8s.io/api v0.0.0-20191121015604-11707872ac1c

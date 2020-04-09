@@ -148,8 +148,14 @@ func TestStrategy_Execute(t *testing.T) {
 
 	stry := &Strategy{
 		pods: []apiv1.Pod{
-			{ObjectMeta: metav1.ObjectMeta{Name: "a"}, Status: apiv1.PodStatus{PodIP: "a.a.a.a"}},
-			{ObjectMeta: metav1.ObjectMeta{Name: "b"}, Status: apiv1.PodStatus{PodIP: "b.b.b.b"}},
+			{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "a"}},
+				Status:     apiv1.PodStatus{PodIP: "a.a.a.a"},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "b"}},
+				Status:     apiv1.PodStatus{PodIP: "b.b.b.b"},
+			},
 		},
 		engine:  &testEngine{},
 		options: sim.NewOptions(options),
@@ -161,6 +167,9 @@ func TestStrategy_Execute(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, stry.doneTime.After(stry.executeTime))
 	require.True(t, round.afterDone)
+	require.Len(t, round.nodes, 2)
+	require.Equal(t, "a", round.nodes[0].Name)
+	require.Equal(t, "b", round.nodes[1].Name)
 }
 
 func TestStrategy_ExecuteFailure(t *testing.T) {

@@ -159,7 +159,7 @@ func (s *Strategy) Deploy(round sim.Round) error {
 func (s *Strategy) makeContext() []sim.NodeInfo {
 	nodes := make([]sim.NodeInfo, len(s.pods))
 	for i, pod := range s.pods {
-		nodes[i].Name = pod.Name
+		nodes[i].Name = pod.Labels[LabelNode]
 		nodes[i].Address = pod.Status.PodIP
 	}
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/xerrors"
 	"k8s.io/client-go/rest"
 	restfake "k8s.io/client-go/rest/fake"
 	"k8s.io/client-go/tools/remotecommand"
@@ -31,9 +32,8 @@ func TestIO_Read(t *testing.T) {
 }
 
 func TestIO_ReadFailure(t *testing.T) {
-	e := errors.New("make executor error")
 	newExecutor = func(cfg *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
-		return testExecutorFactory(e, nil, u)
+		return testExecutorFactory(xerrors.New("oops"), nil, u)
 	}
 
 	fs := kio{
@@ -41,18 +41,25 @@ func TestIO_ReadFailure(t *testing.T) {
 	}
 
 	_, err := fs.Read("", "", "")
-	require.Error(t, err)
-	require.Equal(t, e, err)
+	require.EqualError(t, err, "couldn't make executor: oops")
 
 	newExecutor = func(cfg *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
-		return testFailingExecutorFactory(u)
+		return &fakeExecutor{u, nil, nil, xerrors.New("oops")}, nil
 	}
 	reader, err := fs.Read("", "", "")
 	require.NoError(t, err)
 
 	_, err = reader.Read(make([]byte, 1))
-	require.Error(t, err)
-	require.Equal(t, "stream error", err.Error())
+	require.EqualError(t, err, "command stderr: oops")
+
+	newExecutor = func(cfg *rest.Config, m string, u *url.URL) (remotecommand.Executor, error) {
+		return &fakeExecutor{u, nil, xerrors.New("oops"), nil}, nil
+	}
+	reader, err = fs.Read("", "", "")
+	require.NoError(t, err)
+
+	_, err = reader.Read(make([]byte, 1))
+	require.EqualError(t, err, "command error: oops")
 }
 
 func TestIO_Write(t *testing.T) {
@@ -92,9 +99,10 @@ func TestExec(t *testing.T) {
 }
 
 type fakeExecutor struct {
-	url *url.URL
-	out *bytes.Buffer
-	err error
+	url       *url.URL
+	out       *bytes.Buffer
+	err       error
+	errStream error
 }
 
 func testExecutorFactory(err error, out *bytes.Buffer, u *url.URL) (remotecommand.Executor, error) {
@@ -102,17 +110,17 @@ func testExecutorFactory(err error, out *bytes.Buffer, u *url.URL) (remotecomman
 		return nil, err
 	}
 
-	return &fakeExecutor{u, out, nil}, nil
-}
-
-func testFailingExecutorFactory(u *url.URL) (remotecommand.Executor, error) {
-	return &fakeExecutor{u, nil, errors.New("stream error")}, nil
+	return &fakeExecutor{u, out, nil, nil}, nil
 }
 
 func (e *fakeExecutor) Stream(options remotecommand.StreamOptions) error {
-	if e.err != nil {
-		options.Stderr.Write([]byte(e.err.Error()))
+	if e.errStream != nil {
+		options.Stderr.Write([]byte(e.errStream.Error()))
 		return errors.New("command failed")
+	}
+
+	if e.err != nil {
+		return e.err
 	}
 
 	if e.out != nil {
