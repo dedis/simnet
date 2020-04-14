@@ -53,6 +53,8 @@ func main() {
 		sim.WithImage("nginx", nil, nil, sim.NewTCP(80)),
 		// Example of a mount of type tmpfs.
 		sim.WithTmpFS("/storage", 256*sim.MB),
+		// Example of requesting a minimum amount of resources.
+		kubernetes.WithResources("200m", "64Mi"),
 	}
 
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")

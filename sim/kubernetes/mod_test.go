@@ -13,6 +13,7 @@ import (
 	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/sim"
 	apiv1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/rest"
@@ -289,6 +290,12 @@ func TestStrategy_CleanWithFailure(t *testing.T) {
 func TestStrategy_String(t *testing.T) {
 	stry := &Strategy{engine: &testEngine{}}
 	require.Equal(t, stry.String(), "engine")
+}
+
+func TestWithResources(t *testing.T) {
+	options := sim.NewOptions([]sim.Option{WithResources("200m", "32Mi")})
+	require.Equal(t, resource.MustParse("32Mi"), options.Data[OptionMemoryAlloc].(resource.Quantity))
+	require.Equal(t, resource.MustParse("200m"), options.Data[OptionCPUAlloc].(resource.Quantity))
 }
 
 type testEngine struct {

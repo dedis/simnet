@@ -11,6 +11,7 @@ import (
 	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/sim"
 	apiv1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -24,6 +25,13 @@ const (
 	// ContainerRouterName is the name of the container where the router
 	// will be deployed.
 	ContainerRouterName = "router"
+
+	// OptionMemoryAlloc is the name of the option to change the default max
+	// limit of the amount of memory allocated.
+	OptionMemoryAlloc = "memory-alloc"
+	// OptionCPUAlloc is the name of the option to change the default max limit
+	// of the amount of cpu allocated.
+	OptionCPUAlloc = "cpu-alloc"
 )
 
 var newClientConfig = clientcmd.NewNonInteractiveDeferredLoadingClientConfig
@@ -261,4 +269,13 @@ func (s *Strategy) Clean() error {
 
 func (s *Strategy) String() string {
 	return fmt.Sprintf("%v", s.engine)
+}
+
+// WithResources is a Kubernetes specific option to change the default limits of
+// resources allocated.
+func WithResources(cpu, memory string) sim.Option {
+	return func(opts *sim.Options) {
+		opts.Data[OptionMemoryAlloc] = resource.MustParse(memory)
+		opts.Data[OptionCPUAlloc] = resource.MustParse(cpu)
+	}
 }

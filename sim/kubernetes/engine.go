@@ -86,16 +86,10 @@ var (
 	DeamonLimitCPU = resource.MustParse("50m")
 	// AppRequestMemory is the amount of memory allocated to app containers in the
 	// simulation pods.
-	AppRequestMemory = resource.MustParse("256Mi")
+	AppRequestMemory = resource.MustParse("128Mi")
 	// AppRequestCPU is the number of CPU allocated to app containers in the
 	// simulation pods.
-	AppRequestCPU = resource.MustParse("50m")
-	// AppLimitMemory is the maximum amount of memory allocated to app containers in the
-	// simulation pods.
-	AppLimitMemory = resource.MustParse("256Mi")
-	// AppLimitCPU is the maximum number of CPU allocated to app containers in the
-	// simulation pods.
-	AppLimitCPU = resource.MustParse("200m")
+	AppRequestCPU = resource.MustParse("100m")
 )
 
 var newClient = kubernetes.NewForConfig
@@ -143,6 +137,11 @@ func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeE
 	u, err := url.Parse(config.Host)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't parse the host: %v", err)
+	}
+
+	if options.Data[OptionMemoryAlloc] == nil {
+		options.Data[OptionMemoryAlloc] = AppRequestMemory
+		options.Data[OptionCPUAlloc] = AppRequestCPU
 	}
 
 	return &kubeEngine{
@@ -194,12 +193,8 @@ func (kd *kubeEngine) makeContainer() apiv1.Container {
 		VolumeMounts: mounts,
 		Resources: apiv1.ResourceRequirements{
 			Requests: apiv1.ResourceList{
-				"memory": AppRequestMemory,
-				"cpu":    AppRequestCPU,
-			},
-			Limits: apiv1.ResourceList{
-				"memory": AppLimitMemory,
-				"cpu":    AppLimitCPU,
+				"memory": kd.options.Data[OptionMemoryAlloc].(resource.Quantity),
+				"cpu":    kd.options.Data[OptionCPUAlloc].(resource.Quantity),
 			},
 		},
 	}

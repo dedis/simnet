@@ -761,6 +761,10 @@ func newKubeEngineTest(client kubernetes.Interface, ns string, n int) *kubeEngin
 		client:    client,
 		namespace: ns,
 		options: &sim.Options{
+			Data: map[string]interface{}{
+				OptionMemoryAlloc: AppRequestMemory,
+				OptionCPUAlloc:    AppRequestCPU,
+			},
 			Topology: network.NewSimpleTopology(n, 50*time.Millisecond),
 		},
 		kio:         newTestKIO(),

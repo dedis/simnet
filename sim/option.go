@@ -40,11 +40,13 @@ type Options struct {
 	Ports         []Port
 	TmpFS         []TmpVolume
 	VPNExecutable string
+	Data          map[string]interface{}
 }
 
 // NewOptions creates empty options.
 func NewOptions(opts []Option) *Options {
 	o := &Options{
+		Data:          make(map[string]interface{}),
 		VPNExecutable: "openvpn",
 	}
 
