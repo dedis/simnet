@@ -177,12 +177,21 @@ func (kd *kubeEngine) makeContainer() apiv1.Container {
 		}
 	}
 
+	mounts := []apiv1.VolumeMount{}
+	for i, tmpfs := range kd.options.TmpFS {
+		mounts = append(mounts, apiv1.VolumeMount{
+			Name:      tmpfsName(i),
+			MountPath: tmpfs.Destination,
+		})
+	}
+
 	return apiv1.Container{
-		Name:    ContainerAppName,
-		Image:   kd.options.Image,
-		Command: kd.options.Cmd,
-		Args:    kd.options.Args,
-		Ports:   pp,
+		Name:         ContainerAppName,
+		Image:        kd.options.Image,
+		Command:      kd.options.Cmd,
+		Args:         kd.options.Args,
+		Ports:        pp,
+		VolumeMounts: mounts,
 		Resources: apiv1.ResourceRequirements{
 			Requests: apiv1.ResourceList{
 				"memory": AppRequestMemory,
@@ -213,7 +222,7 @@ func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 	}
 
 	for _, node := range kd.options.Topology.GetNodes() {
-		deployment := makeDeployment(node.String(), kd.makeContainer())
+		deployment := kd.makeDeployment(node.String(), kd.makeContainer())
 
 		_, err = intf.Create(deployment)
 		if err != nil {
@@ -692,11 +701,34 @@ func int32Ptr(v int32) *int32 {
 	return &v
 }
 
-func makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
+func (kd *kubeEngine) makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
 	labels := map[string]string{
 		LabelApp:  AppName,
 		LabelID:   AppID,
 		LabelNode: node,
+	}
+
+	volumes := []apiv1.Volume{
+		{
+			Name: "dockersocket",
+			VolumeSource: apiv1.VolumeSource{
+				HostPath: &apiv1.HostPathVolumeSource{
+					Path: "/var/run/docker.sock",
+				},
+			},
+		},
+	}
+
+	for i, tmpfs := range kd.options.TmpFS {
+		volumes = append(volumes, apiv1.Volume{
+			Name: tmpfsName(i),
+			VolumeSource: apiv1.VolumeSource{
+				EmptyDir: &apiv1.EmptyDirVolumeSource{
+					Medium:    apiv1.StorageMediumMemory,
+					SizeLimit: resource.NewQuantity(tmpfs.Size, resource.BinarySI),
+				},
+			},
+		})
 	}
 
 	return &appsv1.Deployment{
@@ -749,20 +781,15 @@ func makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
 							},
 						},
 					},
-					Volumes: []apiv1.Volume{
-						{
-							Name: "dockersocket",
-							VolumeSource: apiv1.VolumeSource{
-								HostPath: &apiv1.HostPathVolumeSource{
-									Path: "/var/run/docker.sock",
-								},
-							},
-						},
-					},
+					Volumes: volumes,
 				},
 			},
 		},
 	}
+}
+
+func tmpfsName(index int) string {
+	return fmt.Sprintf("tmpfs-%d", index)
 }
 
 func makeRouterDeployment() *appsv1.Deployment {

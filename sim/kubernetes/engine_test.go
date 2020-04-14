@@ -51,6 +51,7 @@ func TestEngine_NewFailures(t *testing.T) {
 func TestEngine_CreateDeployments(t *testing.T) {
 	n := 3
 	engine, client := makeEngine(n)
+	engine.options.TmpFS = []sim.TmpVolume{{Destination: "/abc", Size: 256}}
 	engine.options.Ports = []sim.Port{
 		sim.NewTCP(2000),
 		sim.NewUDP(20001),
