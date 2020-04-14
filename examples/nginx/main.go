@@ -5,11 +5,12 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"go.dedis.ch/simnet"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
-	"go.dedis.ch/simnet/sim/docker"
+	"go.dedis.ch/simnet/sim/kubernetes"
 )
 
 type simRound struct{}
@@ -52,12 +53,14 @@ func main() {
 		sim.WithImage("nginx", nil, nil, sim.NewTCP(80)),
 		// Example of a mount of type tmpfs.
 		sim.WithTmpFS("/storage", 256*sim.MB),
+		// Example of requesting a minimum amount of resources.
+		kubernetes.WithResources("200m", "64Mi"),
 	}
 
-	// kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
-	// engine, err := kubernetes.NewStrategy(kubeconfig, options...)
-	engine, err := docker.NewStrategy(options...)
+	engine, err := kubernetes.NewStrategy(kubeconfig, options...)
+	// engine, err := docker.NewStrategy(options...)
 	if err != nil {
 		panic(err)
 	}

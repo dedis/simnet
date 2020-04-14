@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"context"
 	"io"
 )
 
@@ -59,15 +60,15 @@ type Strategy interface {
 	// Deploy takes care of deploying the application according to the
 	// topology. The simulation should be able to run after it returns
 	// with no error.
-	Deploy(Round) error
+	Deploy(context.Context, Round) error
 
 	// Execute takes the round provided to execute a round of the simulation.
-	Execute(Round) error
+	Execute(context.Context, Round) error
 
 	// WriteStats reads the data writtent by the monitors on each node of the
 	// simulation.
-	WriteStats(filename string) error
+	WriteStats(ctx context.Context, filename string) error
 
 	// Clean wipes off any resources that has been created for the simulation.
-	Clean() error
+	Clean(context.Context) error
 }

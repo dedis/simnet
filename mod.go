@@ -1,6 +1,7 @@
 package simnet
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -54,12 +55,15 @@ func (s *Simulation) Run(args []string) error {
 	// Set global options to the strategy.
 	s.strategy.Option(sim.WithVPN(vpnCommand))
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	if doCleaning || doAll {
 		defer func() {
 			// Anything bad happening during the cleaning phase will be printed
 			// so an error of the simulation is returned if any.
 
-			err := s.strategy.Clean()
+			err := s.strategy.Clean(ctx)
 			if err != nil {
 				fmt.Fprintf(s.out, "An error occured during cleaning: %v\n", err)
 				fmt.Fprintln(s.out, "Please make sure to clean remaining components.")
@@ -68,19 +72,19 @@ func (s *Simulation) Run(args []string) error {
 	}
 
 	if doDeploy || doAll {
-		err := s.strategy.Deploy(s.round)
+		err := s.strategy.Deploy(ctx, s.round)
 		if err != nil {
 			return err
 		}
 	}
 
 	if doExecute || doAll {
-		err := s.strategy.Execute(s.round)
+		err := s.strategy.Execute(ctx, s.round)
 		if err != nil {
 			return err
 		}
 
-		err = s.strategy.WriteStats("result.json")
+		err = s.strategy.WriteStats(ctx, "result.json")
 		if err != nil {
 			return err
 		}

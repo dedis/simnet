@@ -23,6 +23,7 @@ import (
 	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
+	"golang.org/x/xerrors"
 )
 
 const (
@@ -90,6 +91,10 @@ type Strategy struct {
 	// Depending on which step the simulation is booting, it is necessary
 	// to know if some states need to be loaded.
 	updated bool
+
+	// Streaming can start either during deployment or during execute so we
+	// start the process only once.
+	streamingLogs bool
 }
 
 // NewStrategy creates a docker strategy for simulations.
@@ -363,31 +368,33 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 }
 
 // Deploy pulls the application image and starts a container per node.
-func (s *Strategy) Deploy(round sim.Round) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 	err := pullImage(ctx, s.cli, s.options.Image, s.out)
 	if err != nil {
-		return fmt.Errorf("couldn't pull the image: %w", err)
+		return xerrors.Errorf("couldn't pull the image: %w", err)
 	}
 
 	fmt.Fprintf(s.out, "Creating containers... In Progress.")
 	err = s.createContainers(ctx)
 	if err != nil {
 		fmt.Fprintln(s.out, goterm.ResetLine("Creating containers... Failed."))
-		return fmt.Errorf("couldn't create the container: %w", err)
+		return xerrors.Errorf("couldn't create the container: %w", err)
 	}
 	fmt.Fprintln(s.out, goterm.ResetLine("Creating containers... Done."))
 
+	err = s.streamLogs(ctx)
+	if err != nil {
+		return xerrors.Errorf("couldn't stream logs: %v", err)
+	}
+
 	err = s.configureContainers(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't configure the containers: %w", err)
+		return xerrors.Errorf("couldn't configure the containers: %w", err)
 	}
 
 	err = s.vpn.Deploy()
 	if err != nil {
-		return fmt.Errorf("couldn't deply the vpn: %v", err)
+		return xerrors.Errorf("couldn't deply the vpn: %v", err)
 	}
 
 	err = round.Before(s.dio, s.makeExecutionContext())
@@ -453,33 +460,26 @@ func (s *Strategy) monitorContainer(ctx context.Context, container types.Contain
 	return closer, nil
 }
 
-func (s *Strategy) streamLogs() (func(), error) {
-	cancels := make([]func(), 0, len(s.containers))
-
-	// Provide a single function to close all the streams.
-	cancelAll := func() {
-		for _, cancel := range cancels {
-			cancel()
-		}
+func (s *Strategy) streamLogs(ctx context.Context) error {
+	if s.streamingLogs {
+		return nil
 	}
+	s.streamingLogs = true
 
 	logFolder := filepath.Join(s.options.OutputDir, "logs")
 
 	// Clean the folder so it does not mix different simulations.
 	err := os.RemoveAll(logFolder)
 	if err != nil {
-		return cancelAll, err
+		return err
 	}
 
 	err = os.MkdirAll(logFolder, 0755)
 	if err != nil {
-		return cancelAll, err
+		return err
 	}
 
 	for _, container := range s.containers {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancels = append(cancels, cancel)
-
 		reader, err := s.cli.ContainerLogs(ctx, container.ID, types.ContainerLogsOptions{
 			ShowStderr: true,
 			ShowStdout: true,
@@ -488,12 +488,12 @@ func (s *Strategy) streamLogs() (func(), error) {
 		})
 
 		if err != nil {
-			return cancelAll, err
+			return err
 		}
 
 		f, err := os.Create(filepath.Join(logFolder, container.Names[0]))
 		if err != nil {
-			return cancelAll, err
+			return err
 		}
 
 		go func() {
@@ -502,13 +502,13 @@ func (s *Strategy) streamLogs() (func(), error) {
 		}()
 	}
 
-	return cancelAll, nil
+	return nil
 }
 
 // Execute takes the round and execute it against the context created from the
 // options.
-func (s *Strategy) Execute(round sim.Round) error {
-	err := s.refreshContainers(context.Background())
+func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
+	err := s.refreshContainers(ctx)
 	if err != nil {
 		return fmt.Errorf("couldn't update the states: %w", err)
 	}
@@ -524,7 +524,7 @@ func (s *Strategy) Execute(round sim.Round) error {
 	}()
 
 	for _, container := range s.containers {
-		closer, err := s.monitorContainer(context.Background(), container)
+		closer, err := s.monitorContainer(ctx, container)
 		if err != nil {
 			return err
 		}
@@ -534,10 +534,9 @@ func (s *Strategy) Execute(round sim.Round) error {
 
 	// Listen for the container logs and write the output in separate files
 	// for each of them in the output folder.
-	cancel, err := s.streamLogs()
-	defer cancel()
+	err = s.streamLogs(ctx)
 	if err != nil {
-		return err
+		return xerrors.Errorf("couldn't stream logs: %v", err)
 	}
 
 	s.statsLock.Lock()
@@ -564,7 +563,7 @@ func (s *Strategy) Execute(round sim.Round) error {
 }
 
 // WriteStats writes the statistics of the nodes to the file.
-func (s *Strategy) WriteStats(filename string) error {
+func (s *Strategy) WriteStats(ctx context.Context, filename string) error {
 	s.statsLock.Lock()
 	defer s.statsLock.Unlock()
 
@@ -589,8 +588,7 @@ func (s *Strategy) WriteStats(filename string) error {
 }
 
 // Clean stops and removes all the containers created by the simulation.
-func (s *Strategy) Clean() error {
-	ctx := context.Background()
+func (s *Strategy) Clean(ctx context.Context) error {
 	errs := []error{}
 
 	err := s.vpn.Clean()

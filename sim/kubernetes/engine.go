@@ -2,12 +2,14 @@ package kubernetes
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
+	"golang.org/x/xerrors"
 
 	"github.com/buger/goterm"
 	appsv1 "k8s.io/api/apps/v1"
@@ -86,16 +89,10 @@ var (
 	DeamonLimitCPU = resource.MustParse("50m")
 	// AppRequestMemory is the amount of memory allocated to app containers in the
 	// simulation pods.
-	AppRequestMemory = resource.MustParse("256Mi")
+	AppRequestMemory = resource.MustParse("128Mi")
 	// AppRequestCPU is the number of CPU allocated to app containers in the
 	// simulation pods.
-	AppRequestCPU = resource.MustParse("50m")
-	// AppLimitMemory is the maximum amount of memory allocated to app containers in the
-	// simulation pods.
-	AppLimitMemory = resource.MustParse("256Mi")
-	// AppLimitCPU is the maximum number of CPU allocated to app containers in the
-	// simulation pods.
-	AppLimitCPU = resource.MustParse("200m")
+	AppRequestCPU = resource.MustParse("100m")
 )
 
 var newClient = kubernetes.NewForConfig
@@ -114,7 +111,7 @@ type engine interface {
 	FetchCertificates() (sim.Certificates, error)
 	DeleteAll() (watch.Interface, error)
 	WaitDeletion(watch.Interface, time.Duration) error
-	StreamLogs(close <-chan struct{}) error
+	StreamLogs(context.Context) error
 	ReadStats(pod string, start, end time.Time) (metrics.NodeStats, error)
 	Read(pod, path string) (io.ReadCloser, error)
 	Write(node, path string, content io.Reader) error
@@ -122,16 +119,17 @@ type engine interface {
 }
 
 type kubeEngine struct {
-	writer      io.Writer
-	options     *sim.Options
-	host        string
-	namespace   string
-	config      *rest.Config
-	client      kubernetes.Interface
-	kio         IO
-	pods        []apiv1.Pod
-	wgLogs      sync.WaitGroup
-	makeEncoder func(io.Writer) Encoder
+	writer        io.Writer
+	options       *sim.Options
+	host          string
+	namespace     string
+	config        *rest.Config
+	client        kubernetes.Interface
+	kio           IO
+	pods          []apiv1.Pod
+	streamingLogs bool
+	wgLogs        sync.WaitGroup
+	makeEncoder   func(io.Writer) Encoder
 }
 
 func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeEngine, error) {
@@ -143,6 +141,11 @@ func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeE
 	u, err := url.Parse(config.Host)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't parse the host: %v", err)
+	}
+
+	if options.Data[OptionMemoryAlloc] == nil {
+		options.Data[OptionMemoryAlloc] = AppRequestMemory
+		options.Data[OptionCPUAlloc] = AppRequestCPU
 	}
 
 	return &kubeEngine{
@@ -177,20 +180,25 @@ func (kd *kubeEngine) makeContainer() apiv1.Container {
 		}
 	}
 
+	mounts := []apiv1.VolumeMount{}
+	for i, tmpfs := range kd.options.TmpFS {
+		mounts = append(mounts, apiv1.VolumeMount{
+			Name:      tmpfsName(i),
+			MountPath: tmpfs.Destination,
+		})
+	}
+
 	return apiv1.Container{
-		Name:    ContainerAppName,
-		Image:   kd.options.Image,
-		Command: kd.options.Cmd,
-		Args:    kd.options.Args,
-		Ports:   pp,
+		Name:         ContainerAppName,
+		Image:        kd.options.Image,
+		Command:      kd.options.Cmd,
+		Args:         kd.options.Args,
+		Ports:        pp,
+		VolumeMounts: mounts,
 		Resources: apiv1.ResourceRequirements{
 			Requests: apiv1.ResourceList{
-				"memory": AppRequestMemory,
-				"cpu":    AppRequestCPU,
-			},
-			Limits: apiv1.ResourceList{
-				"memory": AppLimitMemory,
-				"cpu":    AppLimitCPU,
+				"memory": kd.options.Data[OptionMemoryAlloc].(resource.Quantity),
+				"cpu":    kd.options.Data[OptionCPUAlloc].(resource.Quantity),
 			},
 		},
 	}
@@ -199,23 +207,21 @@ func (kd *kubeEngine) makeContainer() apiv1.Container {
 func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 	fmt.Fprint(kd.writer, "Creating deployment...")
 
-	intf := kd.client.AppsV1().Deployments(kd.namespace)
-
 	opts := metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, AppID),
 	}
 
 	// Watch for the deployment status so that it can wait for all the containers
 	// to have started.
-	w, err := intf.Watch(opts)
+	w, err := kd.client.CoreV1().Pods(kd.namespace).Watch(opts)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, node := range kd.options.Topology.GetNodes() {
-		deployment := makeDeployment(node.String(), kd.makeContainer())
+		deployment := kd.makeDeployment(node.String(), kd.makeContainer())
 
-		_, err = intf.Create(deployment)
+		_, err = kd.client.AppsV1().Deployments(kd.namespace).Create(deployment)
 		if err != nil {
 			return nil, err
 		}
@@ -234,21 +240,21 @@ func (kd *kubeEngine) WaitDeployment(w watch.Interface) error {
 		// Deployments will time out if one of them has not progressed
 		// in a given amount of time.
 		evt := <-w.ResultChan()
-		dpl := evt.Object.(*appsv1.Deployment)
+		pod := evt.Object.(*apiv1.Pod)
 
-		if dpl.Status.AvailableReplicas > 0 {
-			readyMap[dpl.Name] = struct{}{}
+		isReady, err := checkPodStatus(pod)
+		if err != nil {
+			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... failure"))
+			return err
+		}
+
+		if isReady {
+			readyMap[pod.Name] = struct{}{}
 		}
 
 		if len(readyMap) == kd.options.Topology.Len() {
 			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... ok"))
 			return nil
-		}
-
-		hasFailure, reason := checkPodFailure(dpl)
-		if hasFailure {
-			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... failure"))
-			return errors.New(reason)
 		}
 	}
 }
@@ -280,7 +286,6 @@ func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, AppID),
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -292,15 +297,17 @@ func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 	fmt.Fprintln(kd.writer, goterm.ResetLine("Fetching pods... ok"))
 	kd.pods = pods.Items
 
-	err = kd.configureContainer(pods.Items)
-	if err != nil {
-		return nil, err
-	}
-
 	return pods.Items, nil
 }
 
 func (kd *kubeEngine) UploadConfig() error {
+	// 1. Write the pod hostname to allow name resolution during the simulation.
+	err := kd.configureContainer(kd.pods)
+	if err != nil {
+		return xerrors.Errorf("couldn't configure container: %v", err)
+	}
+
+	// 2. Write the topology rules to enable delays and such.
 	mapping := make(map[network.Node]string)
 	for _, pod := range kd.pods {
 		node := pod.Labels[LabelNode]
@@ -341,14 +348,16 @@ func (kd *kubeEngine) UploadConfig() error {
 func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
 	fmt.Fprintf(kd.writer, "Deploying the router...")
 
-	intf := kd.client.AppsV1().Deployments(kd.namespace)
+	opts := metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", LabelID, RouterID),
+	}
 
-	w, err := intf.Watch(metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", LabelID, RouterID)})
+	w, err := kd.client.CoreV1().Pods(kd.namespace).Watch(opts)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = intf.Create(makeRouterDeployment())
+	_, err = kd.client.AppsV1().Deployments(kd.namespace).Create(makeRouterDeployment())
 	if err != nil {
 		return nil, err
 	}
@@ -389,9 +398,14 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string,
 		// Deployment will time out after some time if it has not
 		// progressed.
 		evt := <-w.ResultChan()
-		dpl := evt.Object.(*appsv1.Deployment)
+		pod := evt.Object.(*apiv1.Pod)
 
-		if dpl.Status.AvailableReplicas > 0 {
+		isReady, err := checkPodStatus(pod)
+		if err != nil {
+			return nil, "", xerrors.Errorf("couldn't wait router: %v", err)
+		}
+
+		if isReady {
 			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... ok"))
 			port, err := kd.createVPNService()
 			if err != nil {
@@ -399,12 +413,6 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string,
 			}
 
 			return port, kd.host, nil
-		}
-
-		hasFailure, reason := checkPodFailure(dpl)
-		if hasFailure {
-			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... failure"))
-			return nil, "", errors.New(reason)
 		}
 	}
 }
@@ -549,7 +557,13 @@ func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) err
 // StreamLogs open a stream for each application container that is attached to
 // the stdout and stderr. Those logs are then written in file in the output
 // directory.
-func (kd *kubeEngine) StreamLogs(close <-chan struct{}) error {
+func (kd *kubeEngine) StreamLogs(ctx context.Context) error {
+	// Start streaming either during deploy or execute but not both.
+	if kd.streamingLogs {
+		return nil
+	}
+	kd.streamingLogs = true
+
 	dir := filepath.Join(kd.options.OutputDir, "logs")
 
 	// Clean the folder to remove old log files.
@@ -590,7 +604,7 @@ func (kd *kubeEngine) StreamLogs(close <-chan struct{}) error {
 		}()
 
 		go func() {
-			<-close
+			<-ctx.Done()
 			// Close the stream if the other side is still opened.
 			reader.Close()
 			file.Close()
@@ -665,38 +679,59 @@ func (kd *kubeEngine) String() string {
 	return fmt.Sprintf("Kubernetes[%s] @ %s", kd.namespace, kd.config.Host)
 }
 
-func checkPodFailure(dpl *appsv1.Deployment) (bool, string) {
-	isAvailable := true
-	isProgressing := true
-	reason := ""
-
-	for _, c := range dpl.Status.Conditions {
-		// A deployment failure is detected when the progression has stopped
-		// but the availability status failed to be true.
-		if c.Type == appsv1.DeploymentProgressing && c.Status == apiv1.ConditionFalse {
-			isProgressing = false
-			reason = c.Reason
+func checkPodStatus(pod *apiv1.Pod) (bool, error) {
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == apiv1.PodScheduled && cond.Status == apiv1.ConditionFalse {
+			return false, xerrors.Errorf("scheduled failed: %s", cond.Reason)
 		}
 
-		if c.Type == appsv1.DeploymentAvailable && c.Status == apiv1.ConditionFalse {
-			// We announce the failure and return the reason why the progression
-			// has stopped.
-			isAvailable = false
+		if cond.Type == apiv1.PodReady && cond.Status == apiv1.ConditionTrue {
+			return true, nil
 		}
 	}
 
-	return !isAvailable && !isProgressing, reason
+	for _, cond := range pod.Status.ContainerStatuses {
+		waiting := cond.State.Waiting
+		if waiting != nil && strings.Contains(waiting.Reason, "Error") {
+			return false, xerrors.New(waiting.Message)
+		}
+	}
+
+	return false, nil
 }
 
 func int32Ptr(v int32) *int32 {
 	return &v
 }
 
-func makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
+func (kd *kubeEngine) makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
 	labels := map[string]string{
 		LabelApp:  AppName,
 		LabelID:   AppID,
 		LabelNode: node,
+	}
+
+	volumes := []apiv1.Volume{
+		{
+			Name: "dockersocket",
+			VolumeSource: apiv1.VolumeSource{
+				HostPath: &apiv1.HostPathVolumeSource{
+					Path: "/var/run/docker.sock",
+				},
+			},
+		},
+	}
+
+	for i, tmpfs := range kd.options.TmpFS {
+		volumes = append(volumes, apiv1.Volume{
+			Name: tmpfsName(i),
+			VolumeSource: apiv1.VolumeSource{
+				EmptyDir: &apiv1.EmptyDirVolumeSource{
+					Medium:    apiv1.StorageMediumMemory,
+					SizeLimit: resource.NewQuantity(tmpfs.Size, resource.BinarySI),
+				},
+			},
+		})
 	}
 
 	return &appsv1.Deployment{
@@ -749,20 +784,15 @@ func makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
 							},
 						},
 					},
-					Volumes: []apiv1.Volume{
-						{
-							Name: "dockersocket",
-							VolumeSource: apiv1.VolumeSource{
-								HostPath: &apiv1.HostPathVolumeSource{
-									Path: "/var/run/docker.sock",
-								},
-							},
-						},
-					},
+					Volumes: volumes,
 				},
 			},
 		},
 	}
+}
+
+func tmpfsName(index int) string {
+	return fmt.Sprintf("tmpfs-%d", index)
 }
 
 func makeRouterDeployment() *appsv1.Deployment {
