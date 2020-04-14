@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
+	"golang.org/x/xerrors"
 
 	"github.com/buger/goterm"
 	appsv1 "k8s.io/api/apps/v1"
@@ -203,15 +205,13 @@ func (kd *kubeEngine) makeContainer() apiv1.Container {
 func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 	fmt.Fprint(kd.writer, "Creating deployment...")
 
-	intf := kd.client.AppsV1().Deployments(kd.namespace)
-
 	opts := metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, AppID),
 	}
 
 	// Watch for the deployment status so that it can wait for all the containers
 	// to have started.
-	w, err := intf.Watch(opts)
+	w, err := kd.client.CoreV1().Pods(kd.namespace).Watch(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +219,7 @@ func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 	for _, node := range kd.options.Topology.GetNodes() {
 		deployment := kd.makeDeployment(node.String(), kd.makeContainer())
 
-		_, err = intf.Create(deployment)
+		_, err = kd.client.AppsV1().Deployments(kd.namespace).Create(deployment)
 		if err != nil {
 			return nil, err
 		}
@@ -238,21 +238,21 @@ func (kd *kubeEngine) WaitDeployment(w watch.Interface) error {
 		// Deployments will time out if one of them has not progressed
 		// in a given amount of time.
 		evt := <-w.ResultChan()
-		dpl := evt.Object.(*appsv1.Deployment)
+		pod := evt.Object.(*apiv1.Pod)
 
-		if dpl.Status.AvailableReplicas > 0 {
-			readyMap[dpl.Name] = struct{}{}
+		isReady, err := checkPodStatus(pod)
+		if err != nil {
+			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... failure"))
+			return err
+		}
+
+		if isReady {
+			readyMap[pod.Name] = struct{}{}
 		}
 
 		if len(readyMap) == kd.options.Topology.Len() {
 			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... ok"))
 			return nil
-		}
-
-		hasFailure, reason := checkPodFailure(dpl)
-		if hasFailure {
-			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... failure"))
-			return errors.New(reason)
 		}
 	}
 }
@@ -345,14 +345,16 @@ func (kd *kubeEngine) UploadConfig() error {
 func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
 	fmt.Fprintf(kd.writer, "Deploying the router...")
 
-	intf := kd.client.AppsV1().Deployments(kd.namespace)
+	opts := metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", LabelID, RouterID),
+	}
 
-	w, err := intf.Watch(metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", LabelID, RouterID)})
+	w, err := kd.client.CoreV1().Pods(kd.namespace).Watch(opts)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = intf.Create(makeRouterDeployment())
+	_, err = kd.client.AppsV1().Deployments(kd.namespace).Create(makeRouterDeployment())
 	if err != nil {
 		return nil, err
 	}
@@ -393,9 +395,14 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string,
 		// Deployment will time out after some time if it has not
 		// progressed.
 		evt := <-w.ResultChan()
-		dpl := evt.Object.(*appsv1.Deployment)
+		pod := evt.Object.(*apiv1.Pod)
 
-		if dpl.Status.AvailableReplicas > 0 {
+		isReady, err := checkPodStatus(pod)
+		if err != nil {
+			return nil, "", xerrors.Errorf("couldn't wait router: %v", err)
+		}
+
+		if isReady {
 			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... ok"))
 			port, err := kd.createVPNService()
 			if err != nil {
@@ -403,12 +410,6 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string,
 			}
 
 			return port, kd.host, nil
-		}
-
-		hasFailure, reason := checkPodFailure(dpl)
-		if hasFailure {
-			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... failure"))
-			return nil, "", errors.New(reason)
 		}
 	}
 }
@@ -669,27 +670,25 @@ func (kd *kubeEngine) String() string {
 	return fmt.Sprintf("Kubernetes[%s] @ %s", kd.namespace, kd.config.Host)
 }
 
-func checkPodFailure(dpl *appsv1.Deployment) (bool, string) {
-	isAvailable := true
-	isProgressing := true
-	reason := ""
-
-	for _, c := range dpl.Status.Conditions {
-		// A deployment failure is detected when the progression has stopped
-		// but the availability status failed to be true.
-		if c.Type == appsv1.DeploymentProgressing && c.Status == apiv1.ConditionFalse {
-			isProgressing = false
-			reason = c.Reason
+func checkPodStatus(pod *apiv1.Pod) (bool, error) {
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == apiv1.PodScheduled && cond.Status == apiv1.ConditionFalse {
+			return false, xerrors.Errorf("scheduled failed: %s", cond.Reason)
 		}
 
-		if c.Type == appsv1.DeploymentAvailable && c.Status == apiv1.ConditionFalse {
-			// We announce the failure and return the reason why the progression
-			// has stopped.
-			isAvailable = false
+		if cond.Type == apiv1.PodReady && cond.Status == apiv1.ConditionTrue {
+			return true, nil
 		}
 	}
 
-	return !isAvailable && !isProgressing, reason
+	for _, cond := range pod.Status.ContainerStatuses {
+		waiting := cond.State.Waiting
+		if waiting != nil && strings.Contains(waiting.Reason, "Error") {
+			return false, xerrors.New(waiting.Message)
+		}
+	}
+
+	return false, nil
 }
 
 func int32Ptr(v int32) *int32 {

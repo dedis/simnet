@@ -61,28 +61,17 @@ func TestEngine_CreateDeployments(t *testing.T) {
 	require.NoError(t, err)
 	defer w.Stop()
 
-	for i := 0; i < n; i++ {
-		select {
-		case evt := <-w.ResultChan():
-			dpl, ok := evt.Object.(*appsv1.Deployment)
-			require.True(t, ok)
-			require.Equal(t, 2, len(dpl.Spec.Template.Spec.Containers))
-		case <-time.After(testTimeout):
-			t.Fatal("timeout")
-		}
-	}
+	require.Len(t, client.Actions(), n+1)
 
-	for _, act := range client.Actions() {
-		if wa, ok := act.(testcore.WatchActionImpl); ok {
-			value, has := wa.WatchRestrictions.Labels.RequiresExactMatch(LabelID)
-			if has {
-				require.Equal(t, AppID, value)
-				return
-			}
-		}
-	}
+	wa, ok := client.Actions()[0].(testcore.WatchActionImpl)
+	require.True(t, ok)
 
-	t.Fatal("watch action not found")
+	value, has := wa.WatchRestrictions.Labels.RequiresExactMatch(LabelID)
+	require.True(t, has)
+	require.Equal(t, AppID, value)
+
+	_, ok = client.Actions()[1].(testcore.CreateActionImpl)
+	require.True(t, ok)
 }
 
 func TestEngine_CreateDeploymentFailure(t *testing.T) {
@@ -115,12 +104,17 @@ func TestEngine_WaitDeployment(t *testing.T) {
 	w := watch.NewFakeWithChanSize(n, false)
 
 	for i := 0; i < n; i++ {
-		w.Modify(&appsv1.Deployment{
+		w.Modify(&apiv1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: fmt.Sprintf("node%d", i),
 			},
-			Status: appsv1.DeploymentStatus{
-				AvailableReplicas: 1,
+			Status: apiv1.PodStatus{
+				Conditions: []apiv1.PodCondition{
+					{
+						Type:   apiv1.PodReady,
+						Status: apiv1.ConditionTrue,
+					},
+				},
 			},
 		})
 	}
@@ -131,28 +125,24 @@ func TestEngine_WaitDeployment(t *testing.T) {
 func TestEngine_WaitDeploymentFailure(t *testing.T) {
 	engine, _ := makeEngine(3)
 
-	reason := "oops"
-
-	w := watch.NewFakeWithChanSize(1, false)
-	w.Modify(&appsv1.Deployment{
-		Status: appsv1.DeploymentStatus{
-			Conditions: []appsv1.DeploymentCondition{
+	w := watch.NewFakeWithChanSize(2, false)
+	w.Modify(&apiv1.Pod{
+		Status: apiv1.PodStatus{},
+	})
+	w.Modify(&apiv1.Pod{
+		Status: apiv1.PodStatus{
+			Conditions: []apiv1.PodCondition{
 				{
-					Type:   appsv1.DeploymentAvailable,
+					Type:   apiv1.PodScheduled,
 					Status: apiv1.ConditionFalse,
-				},
-				{
-					Type:   appsv1.DeploymentProgressing,
-					Status: apiv1.ConditionFalse,
-					Reason: reason,
+					Reason: "oops",
 				},
 			},
 		},
 	})
 
 	err := engine.WaitDeployment(w)
-	require.Error(t, err)
-	require.Equal(t, reason, err.Error())
+	require.EqualError(t, err, "scheduled failed: oops")
 }
 
 func TestEngine_FetchPods(t *testing.T) {
@@ -305,9 +295,14 @@ func TestEngine_WaitRouter(t *testing.T) {
 	engine := newKubeEngineTest(client, "", 0)
 
 	w := watch.NewFakeWithChanSize(1, false)
-	w.Modify(&appsv1.Deployment{
-		Status: appsv1.DeploymentStatus{
-			AvailableReplicas: 1,
+	w.Modify(&apiv1.Pod{
+		Status: apiv1.PodStatus{
+			Conditions: []apiv1.PodCondition{
+				{
+					Type:   apiv1.PodReady,
+					Status: apiv1.ConditionTrue,
+				},
+			},
 		},
 	})
 
@@ -322,28 +317,22 @@ func TestEngine_WaitRouter(t *testing.T) {
 func TestEngine_WaitRouterFailure(t *testing.T) {
 	engine := newKubeEngineTest(fake.NewSimpleClientset(), "", 0)
 
-	reason := "oops"
-
 	w := watch.NewFakeWithChanSize(1, false)
-	w.Modify(&appsv1.Deployment{
-		Status: appsv1.DeploymentStatus{
-			Conditions: []appsv1.DeploymentCondition{
+	w.Modify(&apiv1.Pod{
+		Status: apiv1.PodStatus{
+			ContainerStatuses: []apiv1.ContainerStatus{
 				{
-					Type:   appsv1.DeploymentAvailable,
-					Status: apiv1.ConditionFalse,
-				},
-				{
-					Type:   appsv1.DeploymentProgressing,
-					Status: apiv1.ConditionFalse,
-					Reason: reason,
+					State: apiv1.ContainerState{Waiting: &apiv1.ContainerStateWaiting{
+						Reason:  "FakeError",
+						Message: "oops",
+					}},
 				},
 			},
 		},
 	})
 
 	_, _, err := engine.WaitRouter(w)
-	require.Error(t, err)
-	require.Equal(t, reason, err.Error())
+	require.EqualError(t, err, "couldn't wait router: oops")
 }
 
 func TestEngine_WaitRouterVPNFailure(t *testing.T) {
@@ -359,9 +348,14 @@ func TestEngine_WaitRouterVPNFailure(t *testing.T) {
 	require.Equal(t, e, err)
 
 	w := watch.NewFakeWithChanSize(1, false)
-	w.Modify(&appsv1.Deployment{
-		Status: appsv1.DeploymentStatus{
-			AvailableReplicas: 1,
+	w.Modify(&apiv1.Pod{
+		Status: apiv1.PodStatus{
+			Conditions: []apiv1.PodCondition{
+				{
+					Type:   apiv1.PodReady,
+					Status: apiv1.ConditionTrue,
+				},
+			},
 		},
 	})
 
