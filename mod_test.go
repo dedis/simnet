@@ -2,6 +2,7 @@ package simnet
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"testing"
@@ -33,7 +34,7 @@ type testStrategy struct {
 
 func (e *testStrategy) Option(sim.Option) {}
 
-func (e *testStrategy) Deploy(sim.Round) error {
+func (e *testStrategy) Deploy(context.Context, sim.Round) error {
 	if e.errDeploy != nil {
 		return e.errDeploy
 	}
@@ -41,7 +42,7 @@ func (e *testStrategy) Deploy(sim.Round) error {
 	return nil
 }
 
-func (e *testStrategy) Execute(sim.Round) error {
+func (e *testStrategy) Execute(context.Context, sim.Round) error {
 	if e.errExecute != nil {
 		return e.errExecute
 	}
@@ -49,7 +50,7 @@ func (e *testStrategy) Execute(sim.Round) error {
 	return nil
 }
 
-func (e *testStrategy) WriteStats(filepath string) error {
+func (e *testStrategy) WriteStats(ctx context.Context, filepath string) error {
 	if e.errStats != nil {
 		return e.errStats
 	}
@@ -57,7 +58,7 @@ func (e *testStrategy) WriteStats(filepath string) error {
 	return nil
 }
 
-func (e *testStrategy) Clean() error {
+func (e *testStrategy) Clean(context.Context) error {
 	if e.errClean != nil {
 		return e.errClean
 	}

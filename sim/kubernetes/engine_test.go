@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
+	"golang.org/x/xerrors"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -169,9 +171,7 @@ func TestEngine_FetchPods(t *testing.T) {
 }
 
 func TestEngine_FetchPodsFailure(t *testing.T) {
-	kio := newTestKIO()
 	engine, client := makeEngine(1)
-	engine.kio = kio
 
 	_, err := engine.FetchPods()
 	require.Error(t, err)
@@ -188,13 +188,6 @@ func TestEngine_FetchPodsFailure(t *testing.T) {
 	client.PrependReactor("*", "*", func(action testcore.Action) (bool, runtime.Object, error) {
 		return true, &apiv1.PodList{Items: []apiv1.Pod{{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelID: AppID}}}}}, nil
 	})
-
-	e = errors.New("write error")
-	kio.err = e
-
-	_, err = engine.FetchPods()
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
 }
 
 func TestEngine_UploadConfig(t *testing.T) {
@@ -212,7 +205,7 @@ func TestEngine_UploadConfig(t *testing.T) {
 	err := engine.UploadConfig()
 	require.NoError(t, err)
 
-	dec := json.NewDecoder(engine.kio.(*testKIO).buffer)
+	dec := json.NewDecoder(engine.kio.(*testKIO).execBuffer)
 
 	var rules []network.Rule
 	err = dec.Decode(&rules)
@@ -237,6 +230,11 @@ func TestEngine_UploadConfigFailures(t *testing.T) {
 
 	err := engine.UploadConfig()
 	require.Error(t, err)
+
+	kio.err = xerrors.New("write error")
+	err = engine.UploadConfig()
+	require.EqualError(t, err,
+		"couldn't configure container: couldn't open stream: write error")
 }
 
 func TestEngine_DeployRouter(t *testing.T) {
@@ -593,8 +591,8 @@ func TestEngine_StreamLogs(t *testing.T) {
 	cli := newFakeClientset()
 
 	engine := newKubeEngineTest(cli, "", 0)
-	ch := make(chan struct{})
-	defer close(ch)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	dir, err := ioutil.TempDir(os.TempDir(), "simnet-kubernetes-test")
 	require.NoError(t, err)
@@ -603,7 +601,11 @@ func TestEngine_StreamLogs(t *testing.T) {
 
 	engine.pods = []apiv1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "pod"}}}
 
-	err = engine.StreamLogs(ch)
+	err = engine.StreamLogs(ctx)
+	require.NoError(t, err)
+	require.True(t, engine.streamingLogs)
+
+	err = engine.StreamLogs(ctx)
 	require.NoError(t, err)
 
 	logline := "this is a log line"
@@ -622,17 +624,18 @@ func TestEngine_StreamLogsFailures(t *testing.T) {
 
 	engine := newKubeEngineTest(cli, "", 0)
 	engine.options.OutputDir = "\000"
-	ch := make(chan struct{})
-	defer close(ch)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Error if the log folder cannot be cleaned.
-	err := engine.StreamLogs(ch)
+	err := engine.StreamLogs(ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "couldn't clean")
 
 	// Error if the log folder cannot be created.
 	engine.options.OutputDir = "/"
-	err = engine.StreamLogs(ch)
+	engine.streamingLogs = false
+	err = engine.StreamLogs(ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "couldn't create log folder")
 
@@ -643,14 +646,16 @@ func TestEngine_StreamLogsFailures(t *testing.T) {
 	// Error if a container log file cannot be created.
 	engine.options.OutputDir = dir
 	engine.pods = []apiv1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "\000"}}}
-	err = engine.StreamLogs(ch)
+	engine.streamingLogs = false
+	err = engine.StreamLogs(ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "couldn't create log file")
 
 	// Error if the stream cannot be opened
 	engine.pods = []apiv1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "pod"}}}
+	engine.streamingLogs = false
 	cli.err = errors.New("stream error")
-	err = engine.StreamLogs(ch)
+	err = engine.StreamLogs(ctx)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, cli.err))
 }
@@ -783,15 +788,16 @@ func makeRouterPod() *apiv1.Pod {
 }
 
 type testKIO struct {
-	err     error
-	errRead error
-	buffer  *bytes.Buffer
-	bout    *bytes.Buffer
-	berr    *bytes.Buffer
+	err        error
+	errRead    error
+	buffer     *bytes.Buffer
+	execBuffer *bytes.Buffer
+	bout       *bytes.Buffer
+	berr       *bytes.Buffer
 }
 
 func newTestKIO() *testKIO {
-	return &testKIO{buffer: new(bytes.Buffer)}
+	return &testKIO{buffer: new(bytes.Buffer), execBuffer: new(bytes.Buffer)}
 }
 
 func (fs *testKIO) Read(pod, container, path string) (io.ReadCloser, error) {
@@ -813,7 +819,7 @@ func (fs *testKIO) Write(pod, container, path string, content io.Reader) error {
 
 func (fs *testKIO) Exec(pod, container string, cmd []string, options sim.ExecOptions) error {
 	if options.Stdin != nil {
-		if _, err := io.Copy(fs.buffer, options.Stdin); err != nil {
+		if _, err := io.Copy(fs.execBuffer, options.Stdin); err != nil {
 			return err
 		}
 	}

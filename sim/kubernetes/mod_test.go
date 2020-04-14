@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"context"
 	"errors"
 	"io"
 	"io/ioutil"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/sim"
+	"golang.org/x/xerrors"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -92,55 +94,59 @@ func TestStrategy_DeployWithFailures(t *testing.T) {
 		tun:     testTunnel{},
 	}
 
-	err := stry.Deploy(&testRound{})
+	err := stry.Deploy(context.Background(), &testRound{})
 	require.NoError(t, err)
 
 	// Errors are tested in reverse order to avoid to reset err fields
 	// all the time.
 
 	e := errors.New("configuration error")
-	err = stry.Deploy(&testRound{errBefore: e})
+	err = stry.Deploy(context.Background(), &testRound{errBefore: e})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
 	e = errors.New("tunnel start error")
 	stry.tun = testTunnel{err: e}
-	err = stry.Deploy(&testRound{})
+	err = stry.Deploy(context.Background(), &testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("fetch router error")
 	deployer.errFetchCerts = e
-	err = stry.Deploy(&testRound{})
+	err = stry.Deploy(context.Background(), &testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("wait router error")
 	deployer.errWaitRouter = e
-	err = stry.Deploy(&testRound{})
+	err = stry.Deploy(context.Background(), &testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("deploy router error")
 	deployer.errDeployRouter = e
-	err = stry.Deploy(&testRound{})
+	err = stry.Deploy(context.Background(), &testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("upload config error")
 	deployer.errUploadConfig = e
-	err = stry.Deploy(&testRound{})
+	err = stry.Deploy(context.Background(), &testRound{})
 	require.Equal(t, e, err)
+
+	deployer.errStreamLogs = xerrors.New("oops")
+	err = stry.Deploy(context.Background(), &testRound{})
+	require.EqualError(t, err, "couldn't stream logs: oops")
 
 	e = errors.New("fetch pods error")
 	deployer.errFetchPods = e
-	err = stry.Deploy(&testRound{})
+	err = stry.Deploy(context.Background(), &testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("wait deployment error")
 	deployer.errWaitDeployment = e
-	err = stry.Deploy(&testRound{})
+	err = stry.Deploy(context.Background(), &testRound{})
 	require.Equal(t, e, err)
 
 	e = errors.New("create deployment error")
 	deployer.errDeployment = e
-	err = stry.Deploy(&testRound{})
+	err = stry.Deploy(context.Background(), &testRound{})
 	require.Equal(t, e, err)
 }
 
@@ -160,11 +166,12 @@ func TestStrategy_Execute(t *testing.T) {
 		},
 		engine:  &testEngine{},
 		options: sim.NewOptions(options),
+		updated: true,
 	}
 
 	round := &testRound{}
 
-	err := stry.Execute(round)
+	err := stry.Execute(context.Background(), round)
 	require.NoError(t, err)
 	require.True(t, stry.doneTime.After(stry.executeTime))
 	require.True(t, round.afterDone)
@@ -182,20 +189,23 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 
 	e := errors.New("stream error")
 	stry.engine = &testEngine{errStreamLogs: e}
-	err := stry.Execute(&testRound{})
-	require.Error(t, err)
-	require.Equal(t, err, e)
+	err := stry.Execute(context.Background(), &testRound{})
+	require.EqualError(t, err, "couldn't stream logs: stream error")
 
 	stry.engine = &testEngine{}
 	e = errors.New("round error")
-	err = stry.Execute(&testRound{err: e})
+	err = stry.Execute(context.Background(), &testRound{err: e})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
 	e = errors.New("after error")
-	err = stry.Execute(&testRound{errAfter: e})
+	err = stry.Execute(context.Background(), &testRound{errAfter: e})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
+
+	stry.engine = &testEngine{errFetchPods: xerrors.New("oops")}
+	err = stry.Execute(context.Background(), &testRound{})
+	require.EqualError(t, err, "couldn't fetch pods: oops")
 }
 
 func TestStrategy_WriteStats(t *testing.T) {
@@ -216,7 +226,7 @@ func TestStrategy_WriteStats(t *testing.T) {
 	writer.Close()
 
 	file := "data.json"
-	err = stry.WriteStats(file)
+	err = stry.WriteStats(context.Background(), file)
 	require.NoError(t, err)
 
 	_, err = os.Stat(filepath.Join(dir, file))
@@ -231,13 +241,13 @@ func TestStrategy_WriteStatsFailures(t *testing.T) {
 		options: &sim.Options{},
 	}
 
-	err := stry.WriteStats("")
+	err := stry.WriteStats(context.Background(), "")
 	require.Error(t, err)
 	require.Equal(t, e, err)
 
 	stry.engine = &testEngine{}
 
-	err = stry.WriteStats("")
+	err = stry.WriteStats(context.Background(), "")
 	require.Error(t, err)
 	require.IsType(t, (*os.PathError)(nil), err)
 
@@ -247,7 +257,7 @@ func TestStrategy_WriteStatsFailures(t *testing.T) {
 
 	stry.makeEncoder = newBadEncoder
 	stry.options.OutputDir = dir
-	err = stry.WriteStats("data.json")
+	err = stry.WriteStats(context.Background(), "data.json")
 	require.Error(t, err)
 	require.Equal(t, "encoding error", err.Error())
 }
@@ -258,7 +268,7 @@ func TestStrategy_Clean(t *testing.T) {
 		tun:    testTunnel{},
 	}
 
-	err := stry.Clean()
+	err := stry.Clean(context.Background())
 	require.NoError(t, err)
 }
 
@@ -269,20 +279,20 @@ func TestStrategy_CleanWithFailure(t *testing.T) {
 		engine: &testEngine{},
 	}
 
-	err := stry.Clean()
+	err := stry.Clean(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), e.Error())
 
 	e = errors.New("delete all error")
 	stry.tun = testTunnel{}
 	stry.engine = &testEngine{errDeleteAll: e}
-	err = stry.Clean()
+	err = stry.Clean(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), e.Error())
 
 	e = errors.New("delete wait error")
 	stry.engine = &testEngine{errWaitDeletion: e}
-	err = stry.Clean()
+	err = stry.Clean(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), e.Error())
 }
@@ -349,7 +359,7 @@ func (te *testEngine) WaitDeletion(watch.Interface, time.Duration) error {
 	return te.errWaitDeletion
 }
 
-func (te *testEngine) StreamLogs(<-chan struct{}) error {
+func (te *testEngine) StreamLogs(context.Context) error {
 	return te.errStreamLogs
 }
 

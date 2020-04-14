@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 
 	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/sim"
+	"golang.org/x/xerrors"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/tools/clientcmd"
@@ -56,6 +58,10 @@ type Strategy struct {
 	executeTime time.Time
 	doneTime    time.Time
 	makeEncoder func(io.Writer) Encoder
+
+	// A step of the simulation will fetch some information like the list of
+	// pods and announce that it is updated for the next steps.
+	updated bool
 }
 
 // NewStrategy creates a new simulation engine.
@@ -104,7 +110,7 @@ func (s *Strategy) Option(opt sim.Option) {
 
 // Deploy will create a deployment on the Kubernetes cluster. A pod will then
 // be assigned to simulation nodes.
-func (s *Strategy) Deploy(round sim.Round) error {
+func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 	w, err := s.engine.CreateDeployment()
 	if err != nil {
 		return err
@@ -119,6 +125,11 @@ func (s *Strategy) Deploy(round sim.Round) error {
 	pods, err := s.engine.FetchPods()
 	if err != nil {
 		return err
+	}
+
+	err = s.engine.StreamLogs(ctx)
+	if err != nil {
+		return xerrors.Errorf("couldn't stream logs: %v", err)
 	}
 
 	err = s.engine.UploadConfig()
@@ -161,6 +172,8 @@ func (s *Strategy) Deploy(round sim.Round) error {
 		return err
 	}
 
+	s.updated = true
+
 	return nil
 }
 
@@ -175,16 +188,18 @@ func (s *Strategy) makeContext() []sim.NodeInfo {
 }
 
 // Execute uses the round implementation to execute a simulation round.
-func (s *Strategy) Execute(round sim.Round) error {
-	// Because it's possible to run the deployment step and the execute step
-	// in a different CLI call, the streams of the logs need to be opened and
-	// closed during the execute step.
-	closing := make(chan struct{})
-	defer close(closing)
+func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
+	if !s.updated {
+		var err error
+		s.pods, err = s.engine.FetchPods()
+		if err != nil {
+			return xerrors.Errorf("couldn't fetch pods: %v", err)
+		}
+	}
 
-	err := s.engine.StreamLogs(closing)
+	err := s.engine.StreamLogs(ctx)
 	if err != nil {
-		return err
+		return xerrors.Errorf("couldn't stream logs: %v", err)
 	}
 
 	s.executeTime = time.Now()
@@ -193,14 +208,14 @@ func (s *Strategy) Execute(round sim.Round) error {
 
 	err = round.Execute(s.engine, nodes)
 	if err != nil {
-		return fmt.Errorf("couldn't perform execute step: %w", err)
+		return xerrors.Errorf("couldn't perform execute step: %w", err)
 	}
 
 	s.doneTime = time.Now()
 
 	err = round.After(s.engine, nodes)
 	if err != nil {
-		return fmt.Errorf("couldn't perform after step: %w", err)
+		return xerrors.Errorf("couldn't perform after step: %w", err)
 	}
 
 	return nil
@@ -208,7 +223,7 @@ func (s *Strategy) Execute(round sim.Round) error {
 
 // WriteStats fetches the stats of the nodes then write them into a JSON
 // formatted file.
-func (s *Strategy) WriteStats(filename string) error {
+func (s *Strategy) WriteStats(ctx context.Context, filename string) error {
 	stats := metrics.Stats{
 		Timestamp: s.executeTime.Unix(),
 		Nodes:     make(map[string]metrics.NodeStats),
@@ -240,7 +255,7 @@ func (s *Strategy) WriteStats(filename string) error {
 }
 
 // Clean removes any resource created for the simulation.
-func (s *Strategy) Clean() error {
+func (s *Strategy) Clean(ctx context.Context) error {
 	errs := make([]error, 0, 2)
 
 	err := s.tun.Stop()

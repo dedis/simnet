@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -110,7 +111,7 @@ type engine interface {
 	FetchCertificates() (sim.Certificates, error)
 	DeleteAll() (watch.Interface, error)
 	WaitDeletion(watch.Interface, time.Duration) error
-	StreamLogs(close <-chan struct{}) error
+	StreamLogs(context.Context) error
 	ReadStats(pod string, start, end time.Time) (metrics.NodeStats, error)
 	Read(pod, path string) (io.ReadCloser, error)
 	Write(node, path string, content io.Reader) error
@@ -118,16 +119,17 @@ type engine interface {
 }
 
 type kubeEngine struct {
-	writer      io.Writer
-	options     *sim.Options
-	host        string
-	namespace   string
-	config      *rest.Config
-	client      kubernetes.Interface
-	kio         IO
-	pods        []apiv1.Pod
-	wgLogs      sync.WaitGroup
-	makeEncoder func(io.Writer) Encoder
+	writer        io.Writer
+	options       *sim.Options
+	host          string
+	namespace     string
+	config        *rest.Config
+	client        kubernetes.Interface
+	kio           IO
+	pods          []apiv1.Pod
+	streamingLogs bool
+	wgLogs        sync.WaitGroup
+	makeEncoder   func(io.Writer) Encoder
 }
 
 func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeEngine, error) {
@@ -284,7 +286,6 @@ func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, AppID),
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -296,15 +297,17 @@ func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
 	fmt.Fprintln(kd.writer, goterm.ResetLine("Fetching pods... ok"))
 	kd.pods = pods.Items
 
-	err = kd.configureContainer(pods.Items)
-	if err != nil {
-		return nil, err
-	}
-
 	return pods.Items, nil
 }
 
 func (kd *kubeEngine) UploadConfig() error {
+	// 1. Write the pod hostname to allow name resolution during the simulation.
+	err := kd.configureContainer(kd.pods)
+	if err != nil {
+		return xerrors.Errorf("couldn't configure container: %v", err)
+	}
+
+	// 2. Write the topology rules to enable delays and such.
 	mapping := make(map[network.Node]string)
 	for _, pod := range kd.pods {
 		node := pod.Labels[LabelNode]
@@ -554,7 +557,13 @@ func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) err
 // StreamLogs open a stream for each application container that is attached to
 // the stdout and stderr. Those logs are then written in file in the output
 // directory.
-func (kd *kubeEngine) StreamLogs(close <-chan struct{}) error {
+func (kd *kubeEngine) StreamLogs(ctx context.Context) error {
+	// Start streaming either during deploy or execute but not both.
+	if kd.streamingLogs {
+		return nil
+	}
+	kd.streamingLogs = true
+
 	dir := filepath.Join(kd.options.OutputDir, "logs")
 
 	// Clean the folder to remove old log files.
@@ -595,7 +604,7 @@ func (kd *kubeEngine) StreamLogs(close <-chan struct{}) error {
 		}()
 
 		go func() {
-			<-close
+			<-ctx.Done()
 			// Close the stream if the other side is still opened.
 			reader.Close()
 			file.Close()

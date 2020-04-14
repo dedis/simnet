@@ -58,7 +58,7 @@ func TestStrategy_Deploy(t *testing.T) {
 	enc := json.NewEncoder(client.bufferPullImage)
 	require.NoError(t, enc.Encode(&Event{Status: "Test"}))
 
-	err := s.Deploy(&testRound{})
+	err := s.Deploy(context.Background(), &testRound{})
 	require.NoError(t, err)
 
 	// Check that application and monitor images are pulled.
@@ -143,6 +143,12 @@ func TestStrategy_Deploy(t *testing.T) {
 
 	// Check that the states are marked as updated.
 	require.True(t, s.updated)
+
+	// Check that an error is returned if logs cannot be streamed.
+	s.options.OutputDir = "\000"
+	s.streamingLogs = false
+	err = s.Deploy(context.Background(), &testRound{})
+	require.EqualError(t, err, "couldn't stream logs: open \x00: invalid argument")
 }
 
 func TestStrategy_RoundConfigureFailure(t *testing.T) {
@@ -150,7 +156,7 @@ func TestStrategy_RoundConfigureFailure(t *testing.T) {
 	defer clean()
 
 	e := errors.New("configure error")
-	err := s.Deploy(&testRound{errBefore: e})
+	err := s.Deploy(context.Background(), &testRound{errBefore: e})
 	require.Error(t, err)
 	require.Equal(t, err, e)
 }
@@ -160,7 +166,7 @@ func TestStrategy_DeployVPNError(t *testing.T) {
 	defer clean()
 
 	s.vpn = fakeVPN{err: errors.New("oops")}
-	err := s.Deploy(&testRound{})
+	err := s.Deploy(context.Background(), &testRound{})
 	require.EqualError(t, err, "couldn't deply the vpn: oops")
 }
 
@@ -172,7 +178,7 @@ func TestStrategy_PullImageFailures(t *testing.T) {
 	e := errors.New("pull image error")
 	client.errImagePull = e
 
-	err := s.Deploy(&testRound{})
+	err := s.Deploy(context.Background(), &testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
@@ -205,7 +211,7 @@ func TestStrategy_CreateContainerFailures(t *testing.T) {
 	e := errors.New("create container error")
 	client.errContainerCreate = e
 
-	err := s.Deploy(&testRound{})
+	err := s.Deploy(context.Background(), &testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
@@ -213,7 +219,7 @@ func TestStrategy_CreateContainerFailures(t *testing.T) {
 	client.resetErrors()
 	client.errContainerStart = e
 
-	err = s.Deploy(&testRound{})
+	err = s.Deploy(context.Background(), &testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
@@ -221,7 +227,7 @@ func TestStrategy_CreateContainerFailures(t *testing.T) {
 	client.resetErrors()
 	client.errContainerList = e
 
-	err = s.Deploy(&testRound{})
+	err = s.Deploy(context.Background(), &testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e), err.Error())
 }
@@ -283,7 +289,7 @@ func TestStrategy_ConfigureContainersFailures(t *testing.T) {
 	client.resetErrors()
 	client.errEvent = e
 
-	err = s.Deploy(&testRound{})
+	err = s.Deploy(context.Background(), &testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e), err.Error())
 }
@@ -339,7 +345,7 @@ func TestStrategy_Execute(t *testing.T) {
 	defer clean()
 
 	round := &testRound{}
-	err := s.Execute(round)
+	err := s.Execute(context.Background(), round)
 	require.NoError(t, err)
 
 	require.True(t, s.updated)
@@ -374,18 +380,17 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 
 	e := errors.New("log error")
 	client.errContainerLogs = e
-	err := s.Execute(&testRound{})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	err := s.Execute(context.Background(), &testRound{})
+	require.EqualError(t, err, "couldn't stream logs: log error")
 
 	client.resetErrors()
 	e = errors.New("sim error")
-	err = s.Execute(&testRound{errBefore: e})
+	err = s.Execute(context.Background(), &testRound{errBefore: e})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
 	e = errors.New("after error")
-	err = s.Execute(&testRound{errAfter: e})
+	err = s.Execute(context.Background(), &testRound{errAfter: e})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
@@ -393,7 +398,7 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 	e = errors.New("container list error")
 	client.errContainerList = e
 
-	err = s.Execute(&testRound{})
+	err = s.Execute(context.Background(), &testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 }
@@ -408,7 +413,7 @@ func TestStrategy_MonitorContainerFailures(t *testing.T) {
 	e := errors.New("monitor container error")
 	client.errContainerStats = e
 
-	err := s.Execute(&testRound{})
+	err := s.Execute(context.Background(), &testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e), err.Error())
 }
@@ -425,25 +430,24 @@ func TestStrategy_StreamLogsFailures(t *testing.T) {
 
 	e := errors.New("log stream error")
 	client.errContainerLogs = e
-	cancel, err := s.streamLogs()
-	cancel()
+	err := s.streamLogs(context.Background())
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
 	client.resetErrors()
 	s.containers[1].Names = []string{"\000"}
-	cancel, err = s.streamLogs()
-	cancel()
+	s.streamingLogs = false
+	err = s.streamLogs(context.Background())
 	require.Error(t, err)
 
 	s.options.OutputDir = "\000"
-	cancel, err = s.streamLogs()
-	cancel()
+	s.streamingLogs = false
+	err = s.streamLogs(context.Background())
 	require.Error(t, err)
 
 	s.options.OutputDir = "/etc"
-	cancel, err = s.streamLogs()
-	cancel()
+	s.streamingLogs = false
+	err = s.streamLogs(context.Background())
 	require.Error(t, err)
 }
 
@@ -456,7 +460,7 @@ func TestStrategy_WriteStats(t *testing.T) {
 	enc := json.NewEncoder(buffer)
 	require.NoError(t, enc.Encode(s.stats))
 
-	err := s.WriteStats("abc")
+	err := s.WriteStats(context.Background(), "abc")
 	require.NoError(t, err)
 
 	content, err := ioutil.ReadFile(filepath.Join(s.options.OutputDir, "abc"))
@@ -472,17 +476,17 @@ func TestStrategy_WriteStatsFailures(t *testing.T) {
 		return e
 	}
 
-	err := s.WriteStats("1")
+	err := s.WriteStats(context.Background(), "1")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e), err.Error())
 
 	s.encoder = jsonEncoder
-	err = s.WriteStats("\000")
+	err = s.WriteStats(context.Background(), "\000")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid argument")
 
 	s.options.OutputDir = "\000"
-	err = s.WriteStats("")
+	err = s.WriteStats(context.Background(), "")
 	require.Error(t, err)
 	require.EqualError(t, err, "mkdir \x00: invalid argument")
 }
@@ -497,7 +501,7 @@ func TestStrategy_Clean(t *testing.T) {
 		s.containers = append(s.containers, makeTestContainer(fmt.Sprintf("id:node%d", i)))
 	}
 
-	err := s.Clean()
+	err := s.Clean(context.Background())
 	require.NoError(t, err)
 
 	require.True(t, s.updated)
@@ -515,11 +519,11 @@ func TestStrategy_CleanFailures(t *testing.T) {
 	defer clean()
 
 	s.vpn = fakeVPN{err: errors.New("oops")}
-	err := s.Clean()
+	err := s.Clean(context.Background())
 	require.EqualError(t, err, "couldn't remove the containers: [vpn: oops]")
 
 	client.errContainerList = errors.New("container list error")
-	err = s.Clean()
+	err = s.Clean(context.Background())
 	require.Error(t, err)
 	require.True(t, errors.Is(err, client.errContainerList), err.Error())
 
@@ -530,7 +534,7 @@ func TestStrategy_CleanFailures(t *testing.T) {
 	client.resetErrors()
 	client.errContainerStop = e
 
-	err = s.Clean()
+	err = s.Clean(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), e.Error())
 }
@@ -738,7 +742,7 @@ func (c *testClient) ContainerStats(context.Context, string, bool) (types.Contai
 	enc := json.NewEncoder(buffer)
 	enc.Encode(&types.StatsJSON{
 		Networks: map[string]types.NetworkStats{
-			"eth0": types.NetworkStats{
+			"eth0": {
 				TxBytes: testStatBaseValue,
 				RxBytes: testStatBaseValue + 1,
 			},
