@@ -44,6 +44,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 
 	go io.Copy(os.Stdout, reader)
 
+	simio.Tag("Init")
 	err := simio.Exec("node0", commandWorkloadInit, sim.ExecOptions{
 		Stdout: writer,
 		Stderr: writer,
@@ -52,6 +53,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 		return err
 	}
 
+	simio.Tag("Run")
 	err = simio.Exec("node0", commandWorkloadRun, sim.ExecOptions{
 		Stdout: writer,
 		Stderr: writer,

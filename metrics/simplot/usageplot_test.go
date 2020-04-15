@@ -32,6 +32,10 @@ func TestUsagePlot_Process(t *testing.T) {
 	require.NotNil(t, p)
 	require.Equal(t, 24, len(values))
 	require.Equal(t, n, values[1].(plotter.XYs).Len())
+
+	ticks := p.X.Tick.Marker.Ticks(0, 5)
+	require.Len(t, ticks, 6)
+	require.Equal(t, "A, B", ticks[0].Label)
 }
 
 func TestUsagePlot_ProcessFailure(t *testing.T) {
@@ -72,6 +76,11 @@ func makeNodeStats(n int) metrics.NodeStats {
 func makeStats(n int) *metrics.Stats {
 	return &metrics.Stats{
 		Timestamp: time.Now().Unix(),
+		Tags: map[int64]string{
+			0:             "A",
+			1:             "B",
+			9999999999999: "C",
+		},
 		Nodes: map[string]metrics.NodeStats{
 			"node0": makeNodeStats(n),
 			"node1": makeNodeStats(n),

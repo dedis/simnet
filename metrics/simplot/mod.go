@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"go.dedis.ch/simnet/metrics"
+	"golang.org/x/xerrors"
 	"gonum.org/v1/plot/vg"
 )
 
@@ -22,7 +24,7 @@ const (
 	// the statistics.
 	DefaultInputFilePath = "result.json"
 
-	errNoInput        = "coudln't open the input file"
+	errNoInput        = "couldn't open the input file"
 	errInputMalformed = "couldn't read the statistics"
 	errMakePlot       = "couldn't create the plot"
 	errMakeImage      = "couldn't save the plot image"
@@ -31,7 +33,14 @@ const (
 func main() {
 	flagset := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
-	input := flagset.String("input", DefaultInputFilePath, "input file")
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		panic(xerrors.Errorf("couldn't find home directory: %v", err))
+	}
+
+	defaultInput := filepath.Join(homeDir, ".config", "simnet", DefaultInputFilePath)
+
+	input := flagset.String("input", defaultInput, "input file")
 	output := flagset.String("output", "example.png", "file path of the output")
 	withTx := flagset.Bool("tx", false, "add tx to the plot")
 	withRx := flagset.Bool("rx", false, "add rx to the plot")

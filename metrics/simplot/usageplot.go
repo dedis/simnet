@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 
@@ -80,12 +81,29 @@ func (p usagePlot) Process(stats *metrics.Stats) (*plot.Plot, error) {
 		return nil, err
 	}
 
+	plot.X.Tick.Marker = tagTicks{
+		tags: processTags(stats.Tags),
+	}
+
 	err = p.processor(plot, lines...)
 	if err != nil {
 		return nil, err
 	}
 
 	return plot, nil
+}
+
+func processTags(raw map[int64]string) map[int]string {
+	tags := make(map[int]string)
+	for ts, tag := range raw {
+		key := int(ts / (1000 * 1000 * 1000)) // ns to sec
+		if _, ok := tags[key]; ok {
+			tags[key] += ", " + tag
+		} else {
+			tags[key] = tag
+		}
+	}
+	return tags
 }
 
 // makePoints is a helper function to create an array of points using a mapper.
@@ -97,4 +115,30 @@ func makePoints(ns metrics.NodeStats, m mapper) plotter.XYs {
 	}
 
 	return points
+}
+
+type tagTicks struct {
+	tags map[int]string
+}
+
+func (t tagTicks) Ticks(min, max float64) []plot.Tick {
+	tks := make([]plot.Tick, int(max-min+1))
+
+	for i := range tks {
+		value := float64(int(min) + i)
+
+		tks[i] = plot.Tick{
+			Value: value,
+			Label: fmt.Sprintf("+%ds", i),
+		}
+	}
+
+	for key, tag := range t.tags {
+		index := key - int(min)
+		if index >= 0 && index < len(tks) {
+			tks[index].Label = tag
+		}
+	}
+
+	return tks
 }
