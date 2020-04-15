@@ -102,6 +102,8 @@ var (
 )
 
 type engine interface {
+	GetTags() map[int64]string
+	Tag(name string)
 	CreateDeployment() (watch.Interface, error)
 	WaitDeployment(watch.Interface) error
 	FetchPods() ([]apiv1.Pod, error)
@@ -127,6 +129,7 @@ type kubeEngine struct {
 	client        kubernetes.Interface
 	kio           IO
 	pods          []apiv1.Pod
+	tags          map[int64]string
 	streamingLogs bool
 	wgLogs        sync.WaitGroup
 	makeEncoder   func(io.Writer) Encoder
@@ -160,8 +163,22 @@ func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeE
 			namespace:  ns,
 			config:     config,
 		},
+		tags:        make(map[int64]string),
 		makeEncoder: makeJSONEncoder,
 	}, nil
+}
+
+func (kd *kubeEngine) GetTags() map[int64]string {
+	tags := make(map[int64]string)
+	for k, v := range kd.tags {
+		tags[k] = v
+	}
+	return tags
+}
+
+func (kd *kubeEngine) Tag(name string) {
+	key := time.Now().UnixNano()
+	kd.tags[key] = name
 }
 
 func (kd *kubeEngine) makeContainer() apiv1.Container {

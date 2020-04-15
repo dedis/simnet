@@ -309,6 +309,7 @@ func TestWithResources(t *testing.T) {
 }
 
 type testEngine struct {
+	engine
 	reader            io.ReadCloser
 	errDeployment     error
 	errWaitDeployment error
@@ -321,6 +322,12 @@ type testEngine struct {
 	errWaitDeletion   error
 	errStreamLogs     error
 	errRead           error
+}
+
+func (te *testEngine) GetTags() map[int64]string {
+	return map[int64]string{
+		time.Now().Unix(): "tag",
+	}
 }
 
 func (te *testEngine) CreateDeployment() (watch.Interface, error) {

@@ -15,6 +15,11 @@ const testLines = `
 
 `
 
+func TestStats_New(t *testing.T) {
+	stats := NewStats()
+	require.NotNil(t, stats.Tags)
+}
+
 func TestStats_NodeStats(t *testing.T) {
 	lines := []byte(testLines)
 	reader := bytes.NewReader(lines)

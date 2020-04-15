@@ -7,15 +7,32 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/sim"
 )
 
 type dockerio struct {
-	cli client.APIClient
+	cli   client.APIClient
+	stats *metrics.Stats
+}
+
+func newDockerIO(cli client.APIClient, stats *metrics.Stats) dockerio {
+	return dockerio{
+		cli:   cli,
+		stats: stats,
+	}
+}
+
+// Tag saves the tag using the current timestamp as the key. It allows the
+// drawing of plots with points in time tagged.
+func (dio dockerio) Tag(name string) {
+	key := time.Now().UnixNano()
+	dio.stats.Tags[key] = name
 }
 
 // Read reads a file in the container at the given path. It returns a reader

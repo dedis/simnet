@@ -83,7 +83,7 @@ type Strategy struct {
 	dio        sim.IO
 	options    *sim.Options
 	containers []types.Container
-	stats      *metrics.Stats
+	stats      metrics.Stats
 	statsLock  sync.Mutex
 	encoder    Encoder
 	vpn        VPN
@@ -105,18 +105,17 @@ func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 	}
 
 	options := sim.NewOptions(opts)
+	stats := metrics.NewStats()
 
 	return &Strategy{
 		out:        os.Stdout,
 		cli:        cli,
 		vpn:        newDockerOpenVPN(cli, os.Stdout, options),
-		dio:        dockerio{cli: cli},
+		dio:        newDockerIO(cli, &stats),
 		options:    options,
 		containers: make([]types.Container, 0),
-		stats: &metrics.Stats{
-			Nodes: make(map[string]metrics.NodeStats),
-		},
-		encoder: jsonEncoder,
+		stats:      stats,
+		encoder:    jsonEncoder,
 	}, nil
 }
 
@@ -577,7 +576,7 @@ func (s *Strategy) WriteStats(ctx context.Context, filename string) error {
 		return err
 	}
 
-	err = s.encoder(file, s.stats)
+	err = s.encoder(file, &s.stats)
 	if err != nil {
 		return fmt.Errorf("couldn't encode the stats: %w", err)
 	}

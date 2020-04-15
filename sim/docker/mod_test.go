@@ -455,7 +455,7 @@ func TestStrategy_WriteStats(t *testing.T) {
 	s, clean := newTestStrategy(t)
 	defer clean()
 
-	s.stats = &metrics.Stats{Timestamp: time.Now().Unix()}
+	s.stats = metrics.Stats{Timestamp: time.Now().Unix()}
 	buffer := new(bytes.Buffer)
 	enc := json.NewEncoder(buffer)
 	require.NoError(t, enc.Encode(s.stats))
@@ -798,6 +798,7 @@ func (c *testClient) Events(ctx context.Context, options types.EventsOptions) (<
 }
 
 type testDockerIO struct {
+	sim.IO
 	err error
 }
 
@@ -863,10 +864,8 @@ func newTestStrategy(t *testing.T) (*Strategy, func()) {
 			sim.WithTmpFS("/storage", 2*sim.GB),
 		}),
 		containers: make([]types.Container, 0),
-		stats: &metrics.Stats{
-			Nodes: make(map[string]metrics.NodeStats),
-		},
-		encoder: jsonEncoder,
+		stats:      metrics.NewStats(),
+		encoder:    jsonEncoder,
 	}, cleaner
 }
 
