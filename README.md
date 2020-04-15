@@ -125,6 +125,22 @@ go run main.go -do-execute
 go run main.go -do-clean
 ```
 
+### Plots
+
+First you need to install the plot tool
+```bash
+go get -u go.dedis.ch/simnet # get latest version
+go install go.dedis.ch/simnet/metrics/simplot
+```
+
+Then to draw a plot
+```bash
+simplot -tx -output plot-tx.png
+simplot -rx -output plot-rx.png
+simplot -cpu -output plot-cpu.png
+simplot -mem -output plot-mem.png
+```
+
 ## Context
 
 The context passed to the round execution contains some pieces of information
@@ -204,16 +220,6 @@ make EXAMPLE="skipchain" run # be patient, time for a coffee !
 # In case the simulation fails and cannot clean the cluster correctly, you
 # can force the deletion.
 make clean
-
-# After the simulation has successfully completed, it will generate a file
-# with the results. A tool is provided to easily generate plots.
-make ARGS="-cpu" plot
-ls example.png
-
-make ARGS="-mem" plot
-make ARGS="-tx" plot
-make ARGS="-rx" plot
-
 ```
 
 ### Chaos testing in Minikube

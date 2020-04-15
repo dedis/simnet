@@ -6,9 +6,6 @@ run:
 clean:
 	cd ./examples/${EXAMPLE} && go run main.go --do-clean
 
-plot:
-	go run ./metrics/plotter/ ${ARGS}
-
 build_monitor:
 	docker build -t dedis/simnet-monitor -f daemon/monitor/Dockerfile .
 
