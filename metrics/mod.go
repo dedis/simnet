@@ -11,7 +11,16 @@ import (
 // Stats represents the JSON structure of the statistics written for each node.
 type Stats struct {
 	Timestamp int64
+	Tags      map[int64]string
 	Nodes     map[string]NodeStats
+}
+
+// NewStats returns a new instance of a statistics object.
+func NewStats() Stats {
+	return Stats{
+		Tags:  make(map[int64]string),
+		Nodes: make(map[string]NodeStats),
+	}
 }
 
 // NodeStats contains the array of data that represents a timeline of the

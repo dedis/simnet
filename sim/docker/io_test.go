@@ -14,8 +14,17 @@ import (
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/client"
 	"github.com/stretchr/testify/require"
+	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/sim"
 )
+
+func TestIO_Tag(t *testing.T) {
+	dio := newTestDockerIO(&testIOClient{})
+
+	dio.Tag("A")
+	dio.Tag("B")
+	require.Len(t, dio.stats.Tags, 2)
+}
 
 func TestIO_Read(t *testing.T) {
 	buffer := bytes.NewBufferString("abc")
@@ -166,8 +175,10 @@ func TestIO_ExecFailures(t *testing.T) {
 }
 
 func newTestDockerIO(client *testIOClient) dockerio {
+	stats := metrics.NewStats()
 	return dockerio{
-		cli: client,
+		cli:   client,
+		stats: &stats,
 	}
 }
 

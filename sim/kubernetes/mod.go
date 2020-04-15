@@ -226,6 +226,7 @@ func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
 func (s *Strategy) WriteStats(ctx context.Context, filename string) error {
 	stats := metrics.Stats{
 		Timestamp: s.executeTime.Unix(),
+		Tags:      s.engine.GetTags(),
 		Nodes:     make(map[string]metrics.NodeStats),
 	}
 

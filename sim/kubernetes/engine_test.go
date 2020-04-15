@@ -50,6 +50,25 @@ func TestEngine_NewFailures(t *testing.T) {
 	require.Nil(t, engine)
 }
 
+func TestEngine_GetTags(t *testing.T) {
+	engine := &kubeEngine{
+		tags: map[int64]string{
+			0: "A",
+			1: "B",
+		},
+	}
+
+	require.Len(t, engine.GetTags(), 2)
+}
+
+func TestEngine_Tag(t *testing.T) {
+	engine := &kubeEngine{tags: make(map[int64]string)}
+
+	engine.Tag("A")
+	engine.Tag("B")
+	require.Len(t, engine.tags, 2)
+}
+
 func TestEngine_CreateDeployments(t *testing.T) {
 	n := 3
 	engine, client := makeEngine(n)

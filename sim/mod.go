@@ -14,6 +14,10 @@ type ExecOptions struct {
 
 // IO provides an API to interact with the nodes.
 type IO interface {
+	// Tag allows to mark a point in time with a given tag. The moment the
+	// function is called will be saved and it can be reported to the plot.
+	Tag(name string)
+
 	// Read reads a file on a simulation node at the given path. It returns a
 	// stream through a reader, or an error if something bad happened.
 	Read(node, path string) (io.ReadCloser, error)
