@@ -393,7 +393,7 @@ func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 
 	err = s.vpn.Deploy()
 	if err != nil {
-		return xerrors.Errorf("couldn't deply the vpn: %v", err)
+		return xerrors.Errorf("couldn't deploy the vpn: %v", err)
 	}
 
 	err = round.Before(s.dio, s.makeExecutionContext())

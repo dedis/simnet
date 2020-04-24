@@ -5,12 +5,12 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"go.dedis.ch/simnet"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
-	"go.dedis.ch/simnet/sim/docker"
 	"go.dedis.ch/simnet/sim/kubernetes"
 )
 
@@ -61,10 +61,10 @@ func main() {
 		kubernetes.WithResources("200m", "64Mi"),
 	}
 
-	// kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
-	// engine, err := kubernetes.NewStrategy(kubeconfig, options...)
-	engine, err := docker.NewStrategy(options...)
+	engine, err := kubernetes.NewStrategy(kubeconfig, options...)
+	// engine, err := docker.NewStrategy(options...)
 	if err != nil {
 		panic(err)
 	}

@@ -78,15 +78,10 @@ const (
 
 var (
 	// DeamonRequestMemory is the amount of memory for monitoring containers.
-	DeamonRequestMemory = resource.MustParse("8Mi")
+	DeamonRequestMemory = resource.MustParse("64Mi")
 	// DeamonRequestCPU is the number of CPU for monitoring containers.
-	DeamonRequestCPU = resource.MustParse("10m")
-	// DeamonLimitMemory is the maximum amount of memory allocated to monitoring containers in
-	// the simulation pods.
-	DeamonLimitMemory = resource.MustParse("16Mi")
-	// DeamonLimitCPU is the maxmimum number of CPU allocated to monitoring containers in
-	// the simulation pods.
-	DeamonLimitCPU = resource.MustParse("50m")
+	DeamonRequestCPU = resource.MustParse("20m")
+
 	// AppRequestMemory is the amount of memory allocated to app containers in the
 	// simulation pods.
 	AppRequestMemory = resource.MustParse("128Mi")
@@ -793,10 +788,6 @@ func (kd *kubeEngine) makeDeployment(node string, container apiv1.Container) *ap
 								Requests: apiv1.ResourceList{
 									"memory": DeamonRequestMemory,
 									"cpu":    DeamonRequestCPU,
-								},
-								Limits: apiv1.ResourceList{
-									"memory": DeamonLimitMemory,
-									"cpu":    DeamonLimitCPU,
 								},
 							},
 						},

@@ -167,7 +167,7 @@ func TestStrategy_DeployVPNError(t *testing.T) {
 
 	s.vpn = fakeVPN{err: errors.New("oops")}
 	err := s.Deploy(context.Background(), &testRound{})
-	require.EqualError(t, err, "couldn't deply the vpn: oops")
+	require.EqualError(t, err, "couldn't deploy the vpn: oops")
 }
 
 func TestStrategy_PullImageFailures(t *testing.T) {

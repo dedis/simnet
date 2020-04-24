@@ -65,6 +65,7 @@ func TestEngine_Tag(t *testing.T) {
 	engine := &kubeEngine{tags: make(map[int64]string)}
 
 	engine.Tag("A")
+	time.Sleep(time.Millisecond)
 	engine.Tag("B")
 	require.Len(t, engine.tags, 2)
 }
