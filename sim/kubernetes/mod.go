@@ -34,6 +34,9 @@ const (
 	// OptionCPUAlloc is the name of the option to change the default max limit
 	// of the amount of cpu allocated.
 	OptionCPUAlloc = "cpu-alloc"
+
+	// CleaningTimeout is the maximum amount the cleaning should take.
+	CleaningTimeout = 30 * time.Second
 )
 
 var newClientConfig = clientcmd.NewNonInteractiveDeferredLoadingClientConfig
@@ -270,7 +273,7 @@ func (s *Strategy) Clean(ctx context.Context) error {
 	} else {
 		defer w.Stop()
 
-		err = s.engine.WaitDeletion(w, 60*time.Second)
+		err = s.engine.WaitDeletion(w, CleaningTimeout)
 		if err != nil {
 			errs = append(errs, err)
 		}

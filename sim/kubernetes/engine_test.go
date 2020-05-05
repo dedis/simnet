@@ -516,33 +516,29 @@ func TestEngine_DeleteFailure(t *testing.T) {
 		return true, nil, nil
 	})
 
-	e := errors.New("delete error")
 	client.PrependReactor("*", "deployments", func(action testcore.Action) (bool, runtime.Object, error) {
-		return true, nil, e
+		return true, nil, xerrors.New("delete error")
 	})
 
 	_, err := engine.DeleteAll()
-	require.Error(t, err)
-	require.Equal(t, e, err)
+	require.EqualError(t, err, "couldn't delete pods: delete error")
 
 	fw := watch.NewFake()
-	e = errors.New("watcher error")
-	client.PrependWatchReactor("deployments", testcore.DefaultWatchReactor(fw, e))
+	client.PrependWatchReactor("deployments",
+		testcore.DefaultWatchReactor(fw, xerrors.New("watcher error")))
 
 	_, err = engine.DeleteAll()
-	require.Error(t, err)
-	require.Equal(t, e, err)
+	require.EqualError(t, err, "couldn't watch: watcher error")
 
 	client = fake.NewSimpleClientset()
 	client.PrependReactor("*", "services", func(action testcore.Action) (bool, runtime.Object, error) {
-		return true, nil, e
+		return true, nil, xerrors.New("oops")
 	})
 
 	engine.client = client
 
 	_, err = engine.DeleteAll()
-	require.Error(t, err)
-	require.IsType(t, (*apierrors.StatusError)(nil), err)
+	require.EqualError(t, err, "couldn't delete router: oops")
 
 	client.PrependReactor("*", "services", func(action testcore.Action) (bool, runtime.Object, error) {
 		return true, nil, &apierrors.StatusError{
@@ -558,19 +554,12 @@ func TestEngine_DeleteFailure(t *testing.T) {
 func TestEngine_WaitDeletion(t *testing.T) {
 	engine, _ := makeEngine(1)
 
-	w := watch.NewFakeWithChanSize(2, false)
+	w := watch.NewFakeWithChanSize(3, false)
 
 	w.Delete(&appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "app"},
 		Status: appsv1.DeploymentStatus{
-			AvailableReplicas:   0,
-			UnavailableReplicas: 0,
-		},
-	})
-	w.Delete(&appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "app"},
-		Status: appsv1.DeploymentStatus{
-			AvailableReplicas:   0,
+			AvailableReplicas:   1,
 			UnavailableReplicas: 0,
 		},
 	})
@@ -580,14 +569,21 @@ func TestEngine_WaitDeletion(t *testing.T) {
 	require.Error(t, err)
 
 	w.Delete(&appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "app"},
+		ObjectMeta: metav1.ObjectMeta{Name: "router"},
 		Status: appsv1.DeploymentStatus{
 			AvailableReplicas:   0,
 			UnavailableReplicas: 0,
 		},
 	})
 	w.Delete(&appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "router"},
+		ObjectMeta: metav1.ObjectMeta{Name: "app"},
+		Status: appsv1.DeploymentStatus{
+			AvailableReplicas:   1,
+			UnavailableReplicas: 0,
+		},
+	})
+	w.Delete(&appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app"},
 		Status: appsv1.DeploymentStatus{
 			AvailableReplicas:   0,
 			UnavailableReplicas: 0,

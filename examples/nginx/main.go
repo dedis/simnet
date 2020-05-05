@@ -51,14 +51,17 @@ func (s simRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
 
 func main() {
 	options := []sim.Option{
+		// sim.WithTopology(
+		// 	network.NewSimpleTopology(3, 25),
+		// ),
 		sim.WithTopology(
-			network.NewSimpleTopology(3, 25),
+			network.NewCloudTopology("beta.kubernetes.io/arch", []string{"amd65"}),
 		),
 		sim.WithImage("nginx", nil, nil, sim.NewTCP(80)),
 		// Example of a mount of type tmpfs.
 		sim.WithTmpFS("/storage", 256*sim.MB),
 		// Example of requesting a minimum amount of resources.
-		kubernetes.WithResources("200m", "64Mi"),
+		kubernetes.WithResources("20m", "64Mi"),
 	}
 
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")

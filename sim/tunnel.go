@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/xerrors"
 )
 
 const (
@@ -169,7 +171,7 @@ func (v *DefaultTunnel) Start(opts ...TunOption) error {
 
 	err = cmd.Run()
 	if err != nil {
-		fmt.Printf("Command 'sudo %s' returns error: %s", options.Cmd, err)
+		fmt.Printf("Command 'sudo %s' returns error: %s\n", options.Cmd, err)
 		return fmt.Errorf("vpn initialization failed: see %s", filepath.Join(v.outDir, LogFileName))
 	}
 
@@ -196,8 +198,10 @@ func (v *DefaultTunnel) Start(opts ...TunOption) error {
 func (v *DefaultTunnel) Stop() error {
 	file, err := os.Open(filepath.Join(v.outDir, PIDFileName))
 	if err != nil {
-		return err
+		return xerrors.Errorf("couldn't read PID: %v", err)
 	}
+
+	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -210,6 +214,9 @@ func (v *DefaultTunnel) Stop() error {
 
 			err = proc.Kill()
 			if err != nil {
+				if err.Error() == "os: process already finished" {
+					return nil
+				}
 				return err
 			}
 		}

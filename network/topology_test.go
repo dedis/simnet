@@ -9,16 +9,16 @@ import (
 )
 
 func TestNode_String(t *testing.T) {
-	node := Node("node0")
+	node := Node{Name: NodeID("node0")}
 	require.Equal(t, "node0", node.String())
 }
 
 func TestTopology_NewSimple(t *testing.T) {
 	topo := NewSimpleTopology(3, 20*time.Millisecond)
 
-	require.Equal(t, Node("node0"), topo.nodes[0])
-	require.Equal(t, Node("node2"), topo.nodes[2])
-	require.Equal(t, int64(20), topo.links[Node("node1")][0].Delay.Value.Milliseconds())
+	require.Equal(t, Node{Name: NodeID("node0")}, topo.nodes[0])
+	require.Equal(t, Node{Name: NodeID("node2")}, topo.nodes[2])
+	require.Equal(t, int64(20), topo.links[NodeID("node1")][0].Delay.Value.Milliseconds())
 }
 
 func TestTopology_NewSimplePropertyCheck(t *testing.T) {
@@ -53,14 +53,14 @@ func TestTopology_GetNodes(t *testing.T) {
 
 func TestTopology_Rules(t *testing.T) {
 	topo := NewSimpleTopology(3, 25*time.Millisecond)
-	mapping := map[Node]string{
-		"node0": "127.0.0.1",
-		"node1": "127.0.0.2",
-		"node2": "127.0.0.3",
+	mapping := map[NodeID]string{
+		NodeID("node0"): "127.0.0.1",
+		NodeID("node1"): "127.0.0.2",
+		NodeID("node2"): "127.0.0.3",
 	}
 
-	rules := topo.Rules(Node("node1"), mapping)
+	rules := topo.Rules(NodeID("node1"), mapping)
 	require.Equal(t, 1, len(rules))
-	require.Equal(t, mapping[Node("node0")], rules[0].IP)
+	require.Equal(t, mapping[NodeID("node0")], rules[0].IP)
 	require.Equal(t, int64(25), rules[0].Delay.Value.Milliseconds())
 }

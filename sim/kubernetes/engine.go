@@ -231,7 +231,11 @@ func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 	}
 
 	for _, node := range kd.options.Topology.GetNodes() {
-		deployment := kd.makeDeployment(node.String(), kd.makeContainer())
+		deployment := kd.makeDeployment(node, kd.makeContainer())
+
+		if cloud, ok := kd.options.Topology.(network.CloudTopology); ok {
+			kd.fillNodeSelector(cloud.NodeSelectorKey, node.NodeSelector, deployment)
+		}
 
 		_, err = kd.client.AppsV1().Deployments(kd.namespace).Create(deployment)
 		if err != nil {
@@ -320,12 +324,12 @@ func (kd *kubeEngine) UploadConfig() error {
 	}
 
 	// 2. Write the topology rules to enable delays and such.
-	mapping := make(map[network.Node]string)
+	mapping := make(map[network.NodeID]string)
 	for _, pod := range kd.pods {
 		node := pod.Labels[LabelNode]
 
 		if node != "" {
-			mapping[network.Node(node)] = pod.Status.PodIP
+			mapping[network.NodeID(node)] = pod.Status.PodIP
 		}
 	}
 
@@ -333,10 +337,10 @@ func (kd *kubeEngine) UploadConfig() error {
 		reader, writer := io.Pipe()
 
 		go func() {
-			node := network.Node(pod.Labels[LabelNode])
+			id := network.NodeID(pod.Labels[LabelNode])
 
 			enc := kd.makeEncoder(writer)
-			err := enc.Encode(kd.options.Topology.Rules(node, mapping))
+			err := enc.Encode(kd.options.Topology.Rules(id, mapping))
 			if err != nil {
 				writer.CloseWithError(err)
 			} else {
@@ -510,7 +514,7 @@ func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
 			// If the service is simply not found, it ignores the error
 			// and keep on the cleaning.
 		} else {
-			return nil, e
+			return nil, xerrors.Errorf("couldn't delete router: %v", err)
 		}
 	}
 
@@ -521,13 +525,13 @@ func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
 	intf := kd.client.AppsV1().Deployments(kd.namespace)
 	w, err := intf.Watch(selector)
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("couldn't watch: %v", err)
 	}
 
 	err = intf.DeleteCollection(deleteOptions, selector)
 	if err != nil {
 		w.Stop()
-		return nil, err
+		return nil, xerrors.Errorf("couldn't delete pods: %v", err)
 	}
 
 	return w, nil
@@ -546,6 +550,7 @@ func (kd *kubeEngine) deleteService(opts *metav1.DeleteOptions) error {
 
 func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) error {
 	tick := time.After(timeout)
+	count := make(map[string]struct{})
 	countDeleted := make(map[string]struct{})
 
 	for {
@@ -554,11 +559,13 @@ func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) err
 			return errors.New("timeout")
 		case evt := <-w.ResultChan():
 			dpl := evt.Object.(*appsv1.Deployment)
+			count[dpl.Name] = struct{}{}
+
 			if dpl.Status.AvailableReplicas == 0 && dpl.Status.UnavailableReplicas == 0 {
 				countDeleted[dpl.Name] = struct{}{}
 			}
 
-			if len(countDeleted) >= kd.options.Topology.Len()+1 {
+			if len(countDeleted) >= len(count) {
 				// No more replicas so the deployment is deleted.
 				return nil
 			}
@@ -716,11 +723,11 @@ func int32Ptr(v int32) *int32 {
 	return &v
 }
 
-func (kd *kubeEngine) makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
+func (kd *kubeEngine) makeDeployment(node network.Node, container apiv1.Container) *appsv1.Deployment {
 	labels := map[string]string{
 		LabelApp:  AppName,
 		LabelID:   AppID,
-		LabelNode: node,
+		LabelNode: node.String(),
 	}
 
 	volumes := []apiv1.Volume{
@@ -762,7 +769,7 @@ func (kd *kubeEngine) makeDeployment(node string, container apiv1.Container) *ap
 					Labels: labels,
 				},
 				Spec: apiv1.PodSpec{
-					Hostname: node,
+					Hostname: node.String(),
 					Containers: []apiv1.Container{
 						container,
 						{
@@ -797,6 +804,14 @@ func (kd *kubeEngine) makeDeployment(node string, container apiv1.Container) *ap
 			},
 		},
 	}
+}
+
+func (kd *kubeEngine) fillNodeSelector(key string, value string, cfg *appsv1.Deployment) {
+	selectors := map[string]string{
+		key: value,
+	}
+
+	cfg.Spec.Template.Spec.NodeSelector = selectors
 }
 
 func tmpfsName(index int) string {

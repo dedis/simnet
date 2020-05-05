@@ -127,8 +127,8 @@ func TestTunnel_StopFailures(t *testing.T) {
 
 	// Expect error when the pid file does not exist.
 	err := tun.Stop()
-	require.Error(t, err)
-	require.IsType(t, (*os.PathError)(nil), err)
+	require.EqualError(t, err,
+		"couldn't read PID: open running_pid: no such file or directory")
 
 	// Expect error for a process that cannot be killed.
 	dir, err := ioutil.TempDir(os.TempDir(), "simnet-vpn-test")
