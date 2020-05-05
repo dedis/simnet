@@ -12,11 +12,17 @@ import (
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
 	"go.dedis.ch/simnet/sim/kubernetes"
+	"golang.org/x/xerrors"
 )
 
 type simRound struct{}
 
 func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
+	err := simio.Disconnect("node0", "node1")
+	if err != nil {
+		return xerrors.Errorf("couldn't disconnect: %v", err)
+	}
+
 	return nil
 }
 
@@ -51,11 +57,8 @@ func (s simRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
 
 func main() {
 	options := []sim.Option{
-		// sim.WithTopology(
-		// 	network.NewSimpleTopology(3, 25),
-		// ),
 		sim.WithTopology(
-			network.NewCloudTopology("beta.kubernetes.io/arch", []string{"amd64"}),
+			network.NewSimpleTopology(3, 25),
 		),
 		sim.WithImage("nginx", nil, nil, sim.NewTCP(80)),
 		// Example of a mount of type tmpfs.

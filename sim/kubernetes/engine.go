@@ -113,6 +113,7 @@ type engine interface {
 	Read(pod, path string) (io.ReadCloser, error)
 	Write(node, path string, content io.Reader) error
 	Exec(node string, cmd []string, options sim.ExecOptions) error
+	Disconnect(string, string) error
 }
 
 type kubeEngine struct {
@@ -659,21 +660,26 @@ func (kd *kubeEngine) ReadStats(pod string, start, end time.Time) (metrics.NodeS
 	return ns, nil
 }
 
-func (kd *kubeEngine) findPodName(node string) string {
+func (kd *kubeEngine) findPod(node string) (apiv1.Pod, bool) {
 	for _, pod := range kd.pods {
 		if pod.Labels[LabelNode] == node {
-			return pod.Name
+			return pod, true
 		}
 	}
 
-	return ""
+	return apiv1.Pod{}, false
 }
 
 // Read implements the IO interface to read a file from a node of the
 // simulation. It returns a reader with the content of the distant
 // file, or an error.
 func (kd *kubeEngine) Read(node, path string) (io.ReadCloser, error) {
-	return kd.kio.Read(kd.findPodName(node), ContainerAppName, path)
+	pod, ok := kd.findPod(node)
+	if !ok {
+		return nil, xerrors.Errorf("unknown node '%s'", node)
+	}
+
+	return kd.kio.Read(pod.Name, ContainerAppName, path)
 }
 
 // Write implements the IO interface to write the content in a distant file
@@ -690,7 +696,12 @@ func (kd *kubeEngine) Write(node, path string, content io.Reader) error {
 		}
 	}()
 
-	err := kd.kio.Write(kd.findPodName(node), ContainerAppName, path, reader)
+	pod, ok := kd.findPod(node)
+	if !ok {
+		return xerrors.Errorf("unknown node '%s'", node)
+	}
+
+	err := kd.kio.Write(pod.Name, ContainerAppName, path, reader)
 	if err != nil {
 		return fmt.Errorf("couldn't open stream: %w", err)
 	}
@@ -701,9 +712,40 @@ func (kd *kubeEngine) Write(node, path string, content io.Reader) error {
 // Exec implements the IO interface to execute a command on a node. It returns
 // the output if the command is a success, or it returns the error.
 func (kd *kubeEngine) Exec(node string, cmd []string, options sim.ExecOptions) error {
-	err := kd.kio.Exec(kd.findPodName(node), ContainerAppName, cmd, options)
+	pod, ok := kd.findPod(node)
+	if !ok {
+		return xerrors.Errorf("unknown node '%s'", node)
+	}
+
+	err := kd.kio.Exec(pod.Name, ContainerAppName, cmd, options)
 	if err != nil {
 		return fmt.Errorf("couldn't open stream: %w", err)
+	}
+
+	return nil
+}
+
+func (kd *kubeEngine) Disconnect(src, dst string) error {
+	opts := sim.ExecOptions{
+		Stdout: kd.writer,
+	}
+
+	dstPod, ok := kd.findPod(dst)
+	if !ok {
+		return xerrors.Errorf("unknown distant node '%s'", dst)
+	}
+
+	srcPod, ok := kd.findPod(src)
+	if !ok {
+		return xerrors.Errorf("unknown source node '%s'", src)
+	}
+
+	insert := fmt.Sprintf("iptables -I OUTPUT -d %s -j DROP", dstPod.Status.PodIP)
+
+	cmd := []string{"/bin/sh", "-c", insert}
+	err := kd.kio.Exec(srcPod.Name, ContainerMonitorName, cmd, opts)
+	if err != nil {
+		return xerrors.Errorf("couldn't disconnect: %v", err)
 	}
 
 	return nil

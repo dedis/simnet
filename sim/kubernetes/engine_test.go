@@ -692,19 +692,29 @@ func TestEngine_ReadStats(t *testing.T) {
 }
 
 func TestEngine_Read(t *testing.T) {
-	engine := &kubeEngine{kio: newTestKIO()}
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: newTestKIO(),
+	}
 
-	reader, err := engine.Read("pod-name", "file-path")
+	reader, err := engine.Read("node0", "file-path")
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 }
 
 func TestEngine_Write(t *testing.T) {
 	kio := newTestKIO()
-	engine := &kubeEngine{kio: kio}
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
 
 	buffer := bytes.NewBufferString("abc")
-	err := engine.Write("", "", buffer)
+	err := engine.Write("node0", "", buffer)
 	require.NoError(t, err)
 
 	out, _ := ioutil.ReadAll(kio.buffer)
@@ -713,12 +723,17 @@ func TestEngine_Write(t *testing.T) {
 
 func TestEngine_WriteFailures(t *testing.T) {
 	kio := newTestKIO()
-	engine := &kubeEngine{kio: kio}
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
 
 	e := errors.New("write error")
 	kio.err = e
 
-	err := engine.Write("", "", new(bytes.Buffer))
+	err := engine.Write("node0", "", new(bytes.Buffer))
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
@@ -726,21 +741,26 @@ func TestEngine_WriteFailures(t *testing.T) {
 	kio.err = nil
 	r, _ := io.Pipe()
 	r.Close()
-	err = engine.Write("", "", r)
+	err = engine.Write("node0", "", r)
 	require.Error(t, err)
 	require.EqualError(t, errors.Unwrap(err), "io: read/write on closed pipe")
 }
 
 func TestEngine_Exec(t *testing.T) {
 	kio := newTestKIO()
-	engine := &kubeEngine{kio: kio}
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
 	kio.bout = bytes.NewBufferString("output example")
 	kio.berr = bytes.NewBufferString("error example")
 
 	bout := new(bytes.Buffer)
 	berr := new(bytes.Buffer)
 
-	err := engine.Exec("", []string{}, sim.ExecOptions{Stdout: bout, Stderr: berr})
+	err := engine.Exec("node0", []string{}, sim.ExecOptions{Stdout: bout, Stderr: berr})
 	require.NoError(t, err)
 	require.Equal(t, "output example", bout.String())
 	require.Equal(t, "error example", berr.String())
@@ -748,12 +768,17 @@ func TestEngine_Exec(t *testing.T) {
 
 func TestEngine_ExecFailures(t *testing.T) {
 	kio := newTestKIO()
-	engine := &kubeEngine{kio: kio}
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
 
 	e := errors.New("exec error")
 	kio.err = e
 
-	err := engine.Exec("", []string{}, sim.ExecOptions{})
+	err := engine.Exec("node0", []string{}, sim.ExecOptions{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 }
