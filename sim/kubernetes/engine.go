@@ -410,6 +410,21 @@ func (kd *kubeEngine) createVPNService() (*apiv1.ServicePort, error) {
 func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string, error) {
 	fmt.Fprintf(kd.writer, "Waiting for the router...")
 
+	host := kd.host
+
+	// Fetch the nodes to get a reachable IP for the vpn. If it fails, the host
+	// of the config will be used.
+	nodes, err := kd.client.CoreV1().Nodes().List(metav1.ListOptions{})
+	if err == nil && len(nodes.Items) > 0 {
+		for _, addr := range nodes.Items[0].Status.Addresses {
+			if addr.Type == apiv1.NodeInternalIP {
+				host = addr.Address
+			}
+		}
+	} else {
+		fmt.Fprintf(kd.writer, "couldn't get nodes: falling back to config host")
+	}
+
 	for {
 		// Deployment will time out after some time if it has not
 		// progressed.
@@ -428,7 +443,7 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string,
 				return nil, "", err
 			}
 
-			return port, kd.host, nil
+			return port, host, nil
 		}
 	}
 }

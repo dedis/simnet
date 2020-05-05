@@ -55,7 +55,7 @@ func main() {
 		// 	network.NewSimpleTopology(3, 25),
 		// ),
 		sim.WithTopology(
-			network.NewCloudTopology("beta.kubernetes.io/arch", []string{"amd65"}),
+			network.NewCloudTopology("beta.kubernetes.io/arch", []string{"amd64"}),
 		),
 		sim.WithImage("nginx", nil, nil, sim.NewTCP(80)),
 		// Example of a mount of type tmpfs.
