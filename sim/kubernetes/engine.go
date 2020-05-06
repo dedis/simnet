@@ -241,6 +241,7 @@ func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 
 		_, err = kd.client.AppsV1().Deployments(kd.namespace).Create(deployment)
 		if err != nil {
+			fmt.Fprintln(kd.writer, goterm.ResetLine("Creating deployment... failure"))
 			return nil, err
 		}
 	}
