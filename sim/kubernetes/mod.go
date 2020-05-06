@@ -36,7 +36,7 @@ const (
 	OptionCPUAlloc = "cpu-alloc"
 
 	// CleaningTimeout is the maximum amount the cleaning should take.
-	CleaningTimeout = 30 * time.Second
+	CleaningTimeout = 60 * time.Second
 )
 
 var newClientConfig = clientcmd.NewNonInteractiveDeferredLoadingClientConfig

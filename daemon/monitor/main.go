@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/docker/docker/api/types"
 )
 
 const (
@@ -62,7 +65,9 @@ func main() {
 			ts := time.Now().Unix()
 			rx := netstat.RxBytes
 			tx := netstat.TxBytes
-			cpu := stats.CPUStats.CPUUsage.TotalUsage
+			previousCPU := stats.PreCPUStats.CPUUsage.TotalUsage
+			previousSystem := stats.PreCPUStats.SystemUsage
+			cpu := calculateCPUPercent(previousCPU, previousSystem, stats)
 			mem := stats.MemoryStats.Usage
 
 			// Each line has the following values:
@@ -73,6 +78,22 @@ func main() {
 			checkErr(err)
 		}
 	}
+}
+
+// https://github.com/moby/moby/blob/eb131c5383db8cac633919f82abad86c99bffbe5/cli/command/container/stats_helpers.go#L175-L188
+func calculateCPUPercent(previousCPU, previousSystem uint64, v *types.StatsJSON) int {
+	var (
+		cpuPercent = 0.0
+		// calculate the change for the cpu usage of the container in between readings
+		cpuDelta = float64(v.CPUStats.CPUUsage.TotalUsage) - float64(previousCPU)
+		// calculate the change for the entire system between readings
+		systemDelta = float64(v.CPUStats.SystemUsage) - float64(previousSystem)
+	)
+
+	if systemDelta > 0.0 && cpuDelta > 0.0 {
+		cpuPercent = (cpuDelta / systemDelta) * float64(len(v.CPUStats.CPUUsage.PercpuUsage)) * 100.0
+	}
+	return int(math.Ceil(cpuPercent * 100))
 }
 
 func checkErr(err error) {

@@ -254,7 +254,7 @@ func TestEngine_UploadConfigFailures(t *testing.T) {
 	kio.err = xerrors.New("write error")
 	err = engine.UploadConfig()
 	require.EqualError(t, err,
-		"couldn't configure container: couldn't open stream: write error")
+		"couldn't configure container: couldn't configure pod: couldn't open stream: write error")
 }
 
 func TestEngine_DeployRouter(t *testing.T) {

@@ -66,7 +66,7 @@ func (s simRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
 func main() {
 	options := []sim.Option{
 		sim.WithTopology(
-			network.NewSimpleTopology(3, 25),
+			network.NewSimpleTopology(3, 25*time.Millisecond),
 		),
 		sim.WithImage("nginx", nil, nil, sim.NewTCP(80)),
 		// Example of a mount of type tmpfs.

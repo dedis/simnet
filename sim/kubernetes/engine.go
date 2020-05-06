@@ -286,14 +286,33 @@ func (kd *kubeEngine) configureContainer(pods []apiv1.Pod) error {
 		buffer.WriteString(fmt.Sprintf("%s\t%s\n", pod.Status.PodIP, pod.Labels[LabelNode]))
 	}
 
-	for i, pod := range pods {
-		fmt.Fprintf(kd.writer, goterm.ResetLine("Configuring pod [%d/%d]"), i+1, len(pods))
-		err := kd.Write(pod.Labels[LabelNode], "/etc/hosts", bytes.NewBuffer(buffer.Bytes()))
-		if err != nil {
-			return err
-		}
+	wg := sync.WaitGroup{}
+	wg.Add(len(pods))
+
+	errCh := make(chan error, len(pods))
+
+	fmt.Fprintf(kd.writer, "Configuring pods...")
+	for _, pod := range pods {
+		go func(pod apiv1.Pod) {
+			defer wg.Done()
+
+			err := kd.Write(pod.Labels[LabelNode], "/etc/hosts", bytes.NewBuffer(buffer.Bytes()))
+			if err != nil {
+				errCh <- err
+			}
+		}(pod)
 	}
-	fmt.Println("")
+
+	wg.Wait()
+	close(errCh)
+
+	err := <-errCh
+	if err != nil {
+		fmt.Fprintln(kd.writer, goterm.ResetLine("Configuring pods... failure"))
+		return xerrors.Errorf("couldn't configure pod: %v", err)
+	}
+
+	fmt.Fprintln(kd.writer, goterm.ResetLine("Configuring pods... ok"))
 
 	return nil
 }
@@ -335,30 +354,51 @@ func (kd *kubeEngine) UploadConfig() error {
 		}
 	}
 
+	wg := sync.WaitGroup{}
+	wg.Add(len(kd.pods))
+
+	errCh := make(chan error, len(kd.pods))
+
+	fmt.Fprint(kd.writer, "Writing topology to pods...")
 	for _, pod := range kd.pods {
-		reader, writer := io.Pipe()
+		go func(pod apiv1.Pod) {
+			defer wg.Done()
 
-		go func() {
-			id := network.NodeID(pod.Labels[LabelNode])
+			reader, writer := io.Pipe()
 
-			enc := kd.makeEncoder(writer)
-			err := enc.Encode(kd.options.Topology.Rules(id, mapping))
+			go func() {
+				id := network.NodeID(pod.Labels[LabelNode])
+
+				enc := kd.makeEncoder(writer)
+				err := enc.Encode(kd.options.Topology.Rules(id, mapping))
+				if err != nil {
+					writer.CloseWithError(err)
+				} else {
+					writer.Close()
+				}
+			}()
+
+			// Logs are written in the stdout of the main process so we get the
+			// logs from the Kubernetes drivers.
+			err := kd.kio.Exec(pod.Name, ContainerMonitorName, commandNetEm, sim.ExecOptions{
+				Stdin: reader,
+			})
 			if err != nil {
-				writer.CloseWithError(err)
-			} else {
-				writer.Close()
+				errCh <- xerrors.Errorf("couldn't execute command: %v", err)
 			}
-		}()
-
-		// Logs are written in the stdout of the main process so we get the
-		// logs from the Kubernetes drivers.
-		err := kd.kio.Exec(pod.Name, ContainerMonitorName, commandNetEm, sim.ExecOptions{
-			Stdin: reader,
-		})
-		if err != nil {
-			return err
-		}
+		}(pod)
 	}
+
+	wg.Wait()
+	close(errCh)
+
+	err = <-errCh
+	if err != nil {
+		fmt.Fprintln(kd.writer, goterm.ResetLine("Writing topology to pods... failure"))
+		return xerrors.Errorf("couldn't write topology: %v", err)
+	}
+
+	fmt.Fprintln(kd.writer, goterm.ResetLine("Writing topology to pods... ok"))
 
 	return nil
 }
@@ -419,7 +459,7 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string,
 	nodes, err := kd.client.CoreV1().Nodes().List(metav1.ListOptions{})
 	if err == nil && len(nodes.Items) > 0 {
 		for _, addr := range nodes.Items[0].Status.Addresses {
-			if addr.Type == apiv1.NodeInternalIP {
+			if addr.Type == apiv1.NodeExternalIP {
 				host = addr.Address
 			}
 		}
