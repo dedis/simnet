@@ -783,6 +783,49 @@ func TestEngine_ExecFailures(t *testing.T) {
 	require.True(t, errors.Is(err, e))
 }
 
+func TestEngine_Disconnect(t *testing.T) {
+	kio := newTestKIO()
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
+
+	err := engine.Disconnect("node0", "node0")
+	require.NoError(t, err)
+
+	err = engine.Disconnect("node1", "node0")
+	require.EqualError(t, err, "unknown source node 'node1'")
+
+	err = engine.Disconnect("node0", "node1")
+	require.EqualError(t, err, "unknown distant node 'node1'")
+
+	kio.err = xerrors.New("oops")
+	err = engine.Disconnect("node0", "node0")
+	require.EqualError(t, err, "couldn't execute command: oops")
+}
+
+func TestEngine_Reconnect(t *testing.T) {
+	kio := newTestKIO()
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
+
+	err := engine.Reconnect("node0")
+	require.NoError(t, err)
+
+	err = engine.Reconnect("node1")
+	require.EqualError(t, err, "unknown node 'node1'")
+
+	kio.err = xerrors.New("oops")
+	err = engine.Reconnect("node0")
+	require.EqualError(t, err, "couldn't execute command: oops")
+}
+
 func TestEngine_String(t *testing.T) {
 	engine := &kubeEngine{
 		namespace: "default",

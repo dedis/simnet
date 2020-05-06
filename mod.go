@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"go.dedis.ch/simnet/sim"
+	"golang.org/x/xerrors"
 )
 
 var doCleaning bool
@@ -98,7 +99,7 @@ func (s *Simulation) Run(args []string) error {
 		// The user can request to only write the statistics to the file.
 		err := s.strategy.WriteStats(ctx, "result.json")
 		if err != nil {
-			return err
+			return xerrors.Errorf("couldn't write statistics: %v", err)
 		}
 	}
 

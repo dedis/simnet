@@ -423,8 +423,6 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string,
 				host = addr.Address
 			}
 		}
-	} else {
-		fmt.Fprintf(kd.writer, "couldn't get nodes: falling back to config host")
 	}
 
 	for {
