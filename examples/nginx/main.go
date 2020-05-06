@@ -18,9 +18,17 @@ import (
 type simRound struct{}
 
 func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
+	// Example how to disconnect a one-way link so that node0 cannot contact
+	// node1 anymore.
 	err := simio.Disconnect("node0", "node1")
 	if err != nil {
 		return xerrors.Errorf("couldn't disconnect: %v", err)
+	}
+
+	// ... and how to revert back.
+	err = simio.Reconnect("node0")
+	if err != nil {
+		return xerrors.Errorf("couldn't reconnect: %v", err)
 	}
 
 	return nil

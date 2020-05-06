@@ -114,6 +114,7 @@ type engine interface {
 	Write(node, path string, content io.Reader) error
 	Exec(node string, cmd []string, options sim.ExecOptions) error
 	Disconnect(string, string) error
+	Reconnect(string) error
 }
 
 type kubeEngine struct {
@@ -726,10 +727,6 @@ func (kd *kubeEngine) Exec(node string, cmd []string, options sim.ExecOptions) e
 }
 
 func (kd *kubeEngine) Disconnect(src, dst string) error {
-	opts := sim.ExecOptions{
-		Stdout: kd.writer,
-	}
-
 	dstPod, ok := kd.findPod(dst)
 	if !ok {
 		return xerrors.Errorf("unknown distant node '%s'", dst)
@@ -743,9 +740,32 @@ func (kd *kubeEngine) Disconnect(src, dst string) error {
 	insert := fmt.Sprintf("iptables -I OUTPUT -d %s -j DROP", dstPod.Status.PodIP)
 
 	cmd := []string{"/bin/sh", "-c", insert}
+	opts := sim.ExecOptions{
+		Stdout: kd.writer,
+	}
+
 	err := kd.kio.Exec(srcPod.Name, ContainerMonitorName, cmd, opts)
 	if err != nil {
-		return xerrors.Errorf("couldn't disconnect: %v", err)
+		return xerrors.Errorf("couldn't execute command: %v", err)
+	}
+
+	return nil
+}
+
+func (kd *kubeEngine) Reconnect(node string) error {
+	pod, ok := kd.findPod(node)
+	if !ok {
+		return xerrors.Errorf("unknown node '%s'", node)
+	}
+
+	cmd := []string{"iptables", "-F"}
+	opts := sim.ExecOptions{
+		Stdout: kd.writer,
+	}
+
+	err := kd.kio.Exec(pod.Name, ContainerMonitorName, cmd, opts)
+	if err != nil {
+		return xerrors.Errorf("couldn't execute command: %v", err)
 	}
 
 	return nil
