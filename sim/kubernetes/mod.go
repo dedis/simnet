@@ -227,6 +227,17 @@ func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
 // WriteStats fetches the stats of the nodes then write them into a JSON
 // formatted file.
 func (s *Strategy) WriteStats(ctx context.Context, filename string) error {
+	if !s.updated {
+		var err error
+		s.pods, err = s.engine.FetchPods()
+		if err != nil {
+			return xerrors.Errorf("couldn't fetch pods: %v", err)
+		}
+
+		s.executeTime = time.Unix(0, 0)
+		s.doneTime = time.Now()
+	}
+
 	stats := metrics.Stats{
 		Timestamp: s.executeTime.Unix(),
 		Tags:      s.engine.GetTags(),
