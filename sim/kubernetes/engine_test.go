@@ -254,7 +254,7 @@ func TestEngine_UploadConfigFailures(t *testing.T) {
 	kio.err = xerrors.New("write error")
 	err = engine.UploadConfig()
 	require.EqualError(t, err,
-		"couldn't configure container: couldn't open stream: write error")
+		"couldn't configure container: couldn't configure pod: couldn't open stream: write error")
 }
 
 func TestEngine_DeployRouter(t *testing.T) {
@@ -516,33 +516,29 @@ func TestEngine_DeleteFailure(t *testing.T) {
 		return true, nil, nil
 	})
 
-	e := errors.New("delete error")
 	client.PrependReactor("*", "deployments", func(action testcore.Action) (bool, runtime.Object, error) {
-		return true, nil, e
+		return true, nil, xerrors.New("delete error")
 	})
 
 	_, err := engine.DeleteAll()
-	require.Error(t, err)
-	require.Equal(t, e, err)
+	require.EqualError(t, err, "couldn't delete pods: delete error")
 
 	fw := watch.NewFake()
-	e = errors.New("watcher error")
-	client.PrependWatchReactor("deployments", testcore.DefaultWatchReactor(fw, e))
+	client.PrependWatchReactor("deployments",
+		testcore.DefaultWatchReactor(fw, xerrors.New("watcher error")))
 
 	_, err = engine.DeleteAll()
-	require.Error(t, err)
-	require.Equal(t, e, err)
+	require.EqualError(t, err, "couldn't watch: watcher error")
 
 	client = fake.NewSimpleClientset()
 	client.PrependReactor("*", "services", func(action testcore.Action) (bool, runtime.Object, error) {
-		return true, nil, e
+		return true, nil, xerrors.New("oops")
 	})
 
 	engine.client = client
 
 	_, err = engine.DeleteAll()
-	require.Error(t, err)
-	require.IsType(t, (*apierrors.StatusError)(nil), err)
+	require.EqualError(t, err, "couldn't delete router: oops")
 
 	client.PrependReactor("*", "services", func(action testcore.Action) (bool, runtime.Object, error) {
 		return true, nil, &apierrors.StatusError{
@@ -558,19 +554,12 @@ func TestEngine_DeleteFailure(t *testing.T) {
 func TestEngine_WaitDeletion(t *testing.T) {
 	engine, _ := makeEngine(1)
 
-	w := watch.NewFakeWithChanSize(2, false)
+	w := watch.NewFakeWithChanSize(3, false)
 
 	w.Delete(&appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "app"},
 		Status: appsv1.DeploymentStatus{
-			AvailableReplicas:   0,
-			UnavailableReplicas: 0,
-		},
-	})
-	w.Delete(&appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "app"},
-		Status: appsv1.DeploymentStatus{
-			AvailableReplicas:   0,
+			AvailableReplicas:   1,
 			UnavailableReplicas: 0,
 		},
 	})
@@ -580,14 +569,21 @@ func TestEngine_WaitDeletion(t *testing.T) {
 	require.Error(t, err)
 
 	w.Delete(&appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "app"},
+		ObjectMeta: metav1.ObjectMeta{Name: "router"},
 		Status: appsv1.DeploymentStatus{
 			AvailableReplicas:   0,
 			UnavailableReplicas: 0,
 		},
 	})
 	w.Delete(&appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "router"},
+		ObjectMeta: metav1.ObjectMeta{Name: "app"},
+		Status: appsv1.DeploymentStatus{
+			AvailableReplicas:   1,
+			UnavailableReplicas: 0,
+		},
+	})
+	w.Delete(&appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app"},
 		Status: appsv1.DeploymentStatus{
 			AvailableReplicas:   0,
 			UnavailableReplicas: 0,
@@ -696,19 +692,29 @@ func TestEngine_ReadStats(t *testing.T) {
 }
 
 func TestEngine_Read(t *testing.T) {
-	engine := &kubeEngine{kio: newTestKIO()}
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: newTestKIO(),
+	}
 
-	reader, err := engine.Read("pod-name", "file-path")
+	reader, err := engine.Read("node0", "file-path")
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 }
 
 func TestEngine_Write(t *testing.T) {
 	kio := newTestKIO()
-	engine := &kubeEngine{kio: kio}
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
 
 	buffer := bytes.NewBufferString("abc")
-	err := engine.Write("", "", buffer)
+	err := engine.Write("node0", "", buffer)
 	require.NoError(t, err)
 
 	out, _ := ioutil.ReadAll(kio.buffer)
@@ -717,12 +723,17 @@ func TestEngine_Write(t *testing.T) {
 
 func TestEngine_WriteFailures(t *testing.T) {
 	kio := newTestKIO()
-	engine := &kubeEngine{kio: kio}
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
 
 	e := errors.New("write error")
 	kio.err = e
 
-	err := engine.Write("", "", new(bytes.Buffer))
+	err := engine.Write("node0", "", new(bytes.Buffer))
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
 
@@ -730,21 +741,26 @@ func TestEngine_WriteFailures(t *testing.T) {
 	kio.err = nil
 	r, _ := io.Pipe()
 	r.Close()
-	err = engine.Write("", "", r)
+	err = engine.Write("node0", "", r)
 	require.Error(t, err)
 	require.EqualError(t, errors.Unwrap(err), "io: read/write on closed pipe")
 }
 
 func TestEngine_Exec(t *testing.T) {
 	kio := newTestKIO()
-	engine := &kubeEngine{kio: kio}
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
 	kio.bout = bytes.NewBufferString("output example")
 	kio.berr = bytes.NewBufferString("error example")
 
 	bout := new(bytes.Buffer)
 	berr := new(bytes.Buffer)
 
-	err := engine.Exec("", []string{}, sim.ExecOptions{Stdout: bout, Stderr: berr})
+	err := engine.Exec("node0", []string{}, sim.ExecOptions{Stdout: bout, Stderr: berr})
 	require.NoError(t, err)
 	require.Equal(t, "output example", bout.String())
 	require.Equal(t, "error example", berr.String())
@@ -752,14 +768,62 @@ func TestEngine_Exec(t *testing.T) {
 
 func TestEngine_ExecFailures(t *testing.T) {
 	kio := newTestKIO()
-	engine := &kubeEngine{kio: kio}
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
 
 	e := errors.New("exec error")
 	kio.err = e
 
-	err := engine.Exec("", []string{}, sim.ExecOptions{})
+	err := engine.Exec("node0", []string{}, sim.ExecOptions{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
+}
+
+func TestEngine_Disconnect(t *testing.T) {
+	kio := newTestKIO()
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
+
+	err := engine.Disconnect("node0", "node0")
+	require.NoError(t, err)
+
+	err = engine.Disconnect("node1", "node0")
+	require.EqualError(t, err, "unknown source node 'node1'")
+
+	err = engine.Disconnect("node0", "node1")
+	require.EqualError(t, err, "unknown distant node 'node1'")
+
+	kio.err = xerrors.New("oops")
+	err = engine.Disconnect("node0", "node0")
+	require.EqualError(t, err, "couldn't execute command: oops")
+}
+
+func TestEngine_Reconnect(t *testing.T) {
+	kio := newTestKIO()
+	engine := &kubeEngine{
+		pods: []apiv1.Pod{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{LabelNode: "node0"}}},
+		},
+		kio: kio,
+	}
+
+	err := engine.Reconnect("node0")
+	require.NoError(t, err)
+
+	err = engine.Reconnect("node1")
+	require.EqualError(t, err, "unknown node 'node1'")
+
+	kio.err = xerrors.New("oops")
+	err = engine.Reconnect("node0")
+	require.EqualError(t, err, "couldn't execute command: oops")
 }
 
 func TestEngine_String(t *testing.T) {

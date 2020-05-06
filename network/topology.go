@@ -11,11 +11,17 @@ const (
 	MaxSize = 5000
 )
 
+// NodeID is the type to define a unique identifier for the node.
+type NodeID string
+
 // Node is a peer of the topology.
-type Node string
+type Node struct {
+	Name         NodeID
+	NodeSelector string
+}
 
 func (n Node) String() string {
-	return string(n)
+	return string(n.Name)
 }
 
 // Link is a network link from the host to the node. It defines the properties
@@ -31,14 +37,14 @@ type Link struct {
 type Topology interface {
 	Len() int
 	GetNodes() []Node
-	Rules(Node, map[Node]string) []Rule
+	Rules(NodeID, map[NodeID]string) []Rule
 }
 
 // SimpleTopology represents a network map where the links between nodes have defined
 // properties.
 type SimpleTopology struct {
 	nodes []Node
-	links map[Node][]Link
+	links map[NodeID][]Link
 }
 
 // NewSimpleTopology creates a simple topology with a delay for traffic going
@@ -48,16 +54,16 @@ func NewSimpleTopology(n int, delay time.Duration) SimpleTopology {
 
 	t := SimpleTopology{
 		nodes: make([]Node, n),
-		links: make(map[Node][]Link),
+		links: make(map[NodeID][]Link),
 	}
 
 	for i := range t.nodes {
-		key := Node(fmt.Sprintf("node%d", i))
+		key := Node{Name: NodeID(fmt.Sprintf("node%d", i))}
 		t.nodes[i] = key
-		t.links[key] = []Link{}
+		t.links[key.Name] = []Link{}
 
 		if i != 0 {
-			t.links[key] = []Link{
+			t.links[key.Name] = []Link{
 				{
 					Distant: t.nodes[0],
 					Delay:   Delay{Value: delay},
@@ -81,10 +87,10 @@ func (t SimpleTopology) GetNodes() []Node {
 
 // Rules generate the rules associated to the node. It relies on the mapping
 // provided to associate a node with an IP.
-func (t SimpleTopology) Rules(node Node, mapping map[Node]string) []Rule {
+func (t SimpleTopology) Rules(node NodeID, mapping map[NodeID]string) []Rule {
 	rules := make([]Rule, 0)
 	for _, link := range t.links[node] {
-		ip := mapping[link.Distant]
+		ip := mapping[link.Distant.Name]
 
 		rules = append(rules, Rule{
 			IP:    ip,

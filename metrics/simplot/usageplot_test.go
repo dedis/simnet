@@ -35,7 +35,8 @@ func TestUsagePlot_Process(t *testing.T) {
 
 	ticks := p.X.Tick.Marker.Ticks(0, 5)
 	require.Len(t, ticks, 6)
-	require.Equal(t, "A, B", ticks[0].Label)
+	require.Contains(t, ticks[0].Label, "A")
+	require.Contains(t, ticks[0].Label, "B")
 }
 
 func TestUsagePlot_ProcessFailure(t *testing.T) {

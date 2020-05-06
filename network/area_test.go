@@ -13,9 +13,9 @@ func TestArea_New(t *testing.T) {
 	require.Len(t, ta.areas, 2)
 	require.Len(t, ta.areas[0].nodes, 3)
 	require.Len(t, ta.areas[1].nodes, 2)
-	require.NotNil(t, ta.areas[0].nodes["node0"])
-	require.Nil(t, ta.areas[1].nodes["node0"])
-	require.NotNil(t, ta.areas[1].nodes["node3"])
+	require.NotNil(t, ta.areas[0].nodes[Node{Name: NodeID("node0")}])
+	require.Nil(t, ta.areas[1].nodes[Node{Name: NodeID("node0")}])
+	require.NotNil(t, ta.areas[1].nodes[Node{Name: NodeID("node3")}])
 
 	for _, area := range ta.areas {
 		for _, links := range area.nodes {
@@ -40,21 +40,21 @@ func TestArea_GetNodes(t *testing.T) {
 
 func TestArea_Rules(t *testing.T) {
 	ta := NewAreaTopology(&Area{N: 2}, &Area{N: 3, X: 10})
-	mapping := map[Node]string{
-		Node("node0"): "127.0.0.1",
-		Node("node1"): "127.0.0.2",
-		Node("node2"): "127.0.0.3",
-		Node("node3"): "127.0.0.4",
-		Node("node4"): "127.0.0.5",
+	mapping := map[NodeID]string{
+		NodeID("node0"): "127.0.0.1",
+		NodeID("node1"): "127.0.0.2",
+		NodeID("node2"): "127.0.0.3",
+		NodeID("node3"): "127.0.0.4",
+		NodeID("node4"): "127.0.0.5",
 	}
 
-	rules := ta.Rules(Node("node1"), mapping)
+	rules := ta.Rules(NodeID("node1"), mapping)
 
 	require.Equal(t, rules[0], Rule{IP: "127.0.0.1"})
 	require.Contains(t, rules, Rule{IP: "127.0.0.3", Delay: Delay{Value: 10 * time.Millisecond}})
 	require.Contains(t, rules, Rule{IP: "127.0.0.4", Delay: Delay{Value: 10 * time.Millisecond}})
 	require.Contains(t, rules, Rule{IP: "127.0.0.5", Delay: Delay{Value: 10 * time.Millisecond}})
 
-	rules = ta.Rules(Node("abc"), nil)
+	rules = ta.Rules(NodeID("abc"), nil)
 	require.Nil(t, rules)
 }

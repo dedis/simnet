@@ -12,11 +12,25 @@ import (
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
 	"go.dedis.ch/simnet/sim/kubernetes"
+	"golang.org/x/xerrors"
 )
 
 type simRound struct{}
 
 func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
+	// Example how to disconnect a one-way link so that node0 cannot contact
+	// node1 anymore.
+	err := simio.Disconnect("node0", "node1")
+	if err != nil {
+		return xerrors.Errorf("couldn't disconnect: %v", err)
+	}
+
+	// ... and how to revert back.
+	err = simio.Reconnect("node0")
+	if err != nil {
+		return xerrors.Errorf("couldn't reconnect: %v", err)
+	}
+
 	return nil
 }
 
@@ -52,13 +66,13 @@ func (s simRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
 func main() {
 	options := []sim.Option{
 		sim.WithTopology(
-			network.NewSimpleTopology(3, 25),
+			network.NewSimpleTopology(3, 25*time.Millisecond),
 		),
 		sim.WithImage("nginx", nil, nil, sim.NewTCP(80)),
 		// Example of a mount of type tmpfs.
 		sim.WithTmpFS("/storage", 256*sim.MB),
 		// Example of requesting a minimum amount of resources.
-		kubernetes.WithResources("200m", "64Mi"),
+		kubernetes.WithResources("20m", "64Mi"),
 	}
 
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")

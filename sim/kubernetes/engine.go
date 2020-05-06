@@ -113,6 +113,8 @@ type engine interface {
 	Read(pod, path string) (io.ReadCloser, error)
 	Write(node, path string, content io.Reader) error
 	Exec(node string, cmd []string, options sim.ExecOptions) error
+	Disconnect(string, string) error
+	Reconnect(string) error
 }
 
 type kubeEngine struct {
@@ -231,7 +233,11 @@ func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 	}
 
 	for _, node := range kd.options.Topology.GetNodes() {
-		deployment := kd.makeDeployment(node.String(), kd.makeContainer())
+		deployment := kd.makeDeployment(node, kd.makeContainer())
+
+		if cloud, ok := kd.options.Topology.(network.CloudTopology); ok {
+			kd.fillNodeSelector(cloud.NodeSelectorKey, node.NodeSelector, deployment)
+		}
 
 		_, err = kd.client.AppsV1().Deployments(kd.namespace).Create(deployment)
 		if err != nil {
@@ -280,14 +286,33 @@ func (kd *kubeEngine) configureContainer(pods []apiv1.Pod) error {
 		buffer.WriteString(fmt.Sprintf("%s\t%s\n", pod.Status.PodIP, pod.Labels[LabelNode]))
 	}
 
-	for i, pod := range pods {
-		fmt.Fprintf(kd.writer, goterm.ResetLine("Configuring pod [%d/%d]"), i+1, len(pods))
-		err := kd.Write(pod.Labels[LabelNode], "/etc/hosts", bytes.NewBuffer(buffer.Bytes()))
-		if err != nil {
-			return err
-		}
+	wg := sync.WaitGroup{}
+	wg.Add(len(pods))
+
+	errCh := make(chan error, len(pods))
+
+	fmt.Fprintf(kd.writer, "Configuring pods...")
+	for _, pod := range pods {
+		go func(pod apiv1.Pod) {
+			defer wg.Done()
+
+			err := kd.Write(pod.Labels[LabelNode], "/etc/hosts", bytes.NewBuffer(buffer.Bytes()))
+			if err != nil {
+				errCh <- err
+			}
+		}(pod)
 	}
-	fmt.Println("")
+
+	wg.Wait()
+	close(errCh)
+
+	err := <-errCh
+	if err != nil {
+		fmt.Fprintln(kd.writer, goterm.ResetLine("Configuring pods... failure"))
+		return xerrors.Errorf("couldn't configure pod: %v", err)
+	}
+
+	fmt.Fprintln(kd.writer, goterm.ResetLine("Configuring pods... ok"))
 
 	return nil
 }
@@ -320,39 +345,60 @@ func (kd *kubeEngine) UploadConfig() error {
 	}
 
 	// 2. Write the topology rules to enable delays and such.
-	mapping := make(map[network.Node]string)
+	mapping := make(map[network.NodeID]string)
 	for _, pod := range kd.pods {
 		node := pod.Labels[LabelNode]
 
 		if node != "" {
-			mapping[network.Node(node)] = pod.Status.PodIP
+			mapping[network.NodeID(node)] = pod.Status.PodIP
 		}
 	}
 
+	wg := sync.WaitGroup{}
+	wg.Add(len(kd.pods))
+
+	errCh := make(chan error, len(kd.pods))
+
+	fmt.Fprint(kd.writer, "Writing topology to pods...")
 	for _, pod := range kd.pods {
-		reader, writer := io.Pipe()
+		go func(pod apiv1.Pod) {
+			defer wg.Done()
 
-		go func() {
-			node := network.Node(pod.Labels[LabelNode])
+			reader, writer := io.Pipe()
 
-			enc := kd.makeEncoder(writer)
-			err := enc.Encode(kd.options.Topology.Rules(node, mapping))
+			go func() {
+				id := network.NodeID(pod.Labels[LabelNode])
+
+				enc := kd.makeEncoder(writer)
+				err := enc.Encode(kd.options.Topology.Rules(id, mapping))
+				if err != nil {
+					writer.CloseWithError(err)
+				} else {
+					writer.Close()
+				}
+			}()
+
+			// Logs are written in the stdout of the main process so we get the
+			// logs from the Kubernetes drivers.
+			err := kd.kio.Exec(pod.Name, ContainerMonitorName, commandNetEm, sim.ExecOptions{
+				Stdin: reader,
+			})
 			if err != nil {
-				writer.CloseWithError(err)
-			} else {
-				writer.Close()
+				errCh <- xerrors.Errorf("couldn't execute command: %v", err)
 			}
-		}()
-
-		// Logs are written in the stdout of the main process so we get the
-		// logs from the Kubernetes drivers.
-		err := kd.kio.Exec(pod.Name, ContainerMonitorName, commandNetEm, sim.ExecOptions{
-			Stdin: reader,
-		})
-		if err != nil {
-			return err
-		}
+		}(pod)
 	}
+
+	wg.Wait()
+	close(errCh)
+
+	err = <-errCh
+	if err != nil {
+		fmt.Fprintln(kd.writer, goterm.ResetLine("Writing topology to pods... failure"))
+		return xerrors.Errorf("couldn't write topology: %v", err)
+	}
+
+	fmt.Fprintln(kd.writer, goterm.ResetLine("Writing topology to pods... ok"))
 
 	return nil
 }
@@ -406,6 +452,19 @@ func (kd *kubeEngine) createVPNService() (*apiv1.ServicePort, error) {
 func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string, error) {
 	fmt.Fprintf(kd.writer, "Waiting for the router...")
 
+	host := kd.host
+
+	// Fetch the nodes to get a reachable IP for the vpn. If it fails, the host
+	// of the config will be used.
+	nodes, err := kd.client.CoreV1().Nodes().List(metav1.ListOptions{})
+	if err == nil && len(nodes.Items) > 0 {
+		for _, addr := range nodes.Items[0].Status.Addresses {
+			if addr.Type == apiv1.NodeExternalIP {
+				host = addr.Address
+			}
+		}
+	}
+
 	for {
 		// Deployment will time out after some time if it has not
 		// progressed.
@@ -424,7 +483,7 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string,
 				return nil, "", err
 			}
 
-			return port, kd.host, nil
+			return port, host, nil
 		}
 	}
 }
@@ -510,7 +569,7 @@ func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
 			// If the service is simply not found, it ignores the error
 			// and keep on the cleaning.
 		} else {
-			return nil, e
+			return nil, xerrors.Errorf("couldn't delete router: %v", err)
 		}
 	}
 
@@ -521,13 +580,13 @@ func (kd *kubeEngine) DeleteAll() (watch.Interface, error) {
 	intf := kd.client.AppsV1().Deployments(kd.namespace)
 	w, err := intf.Watch(selector)
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("couldn't watch: %v", err)
 	}
 
 	err = intf.DeleteCollection(deleteOptions, selector)
 	if err != nil {
 		w.Stop()
-		return nil, err
+		return nil, xerrors.Errorf("couldn't delete pods: %v", err)
 	}
 
 	return w, nil
@@ -546,6 +605,7 @@ func (kd *kubeEngine) deleteService(opts *metav1.DeleteOptions) error {
 
 func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) error {
 	tick := time.After(timeout)
+	count := make(map[string]struct{})
 	countDeleted := make(map[string]struct{})
 
 	for {
@@ -554,11 +614,13 @@ func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) err
 			return errors.New("timeout")
 		case evt := <-w.ResultChan():
 			dpl := evt.Object.(*appsv1.Deployment)
+			count[dpl.Name] = struct{}{}
+
 			if dpl.Status.AvailableReplicas == 0 && dpl.Status.UnavailableReplicas == 0 {
 				countDeleted[dpl.Name] = struct{}{}
 			}
 
-			if len(countDeleted) >= kd.options.Topology.Len()+1 {
+			if len(countDeleted) >= len(count) {
 				// No more replicas so the deployment is deleted.
 				return nil
 			}
@@ -637,21 +699,26 @@ func (kd *kubeEngine) ReadStats(pod string, start, end time.Time) (metrics.NodeS
 	return ns, nil
 }
 
-func (kd *kubeEngine) findPodName(node string) string {
+func (kd *kubeEngine) findPod(node string) (apiv1.Pod, bool) {
 	for _, pod := range kd.pods {
 		if pod.Labels[LabelNode] == node {
-			return pod.Name
+			return pod, true
 		}
 	}
 
-	return ""
+	return apiv1.Pod{}, false
 }
 
 // Read implements the IO interface to read a file from a node of the
 // simulation. It returns a reader with the content of the distant
 // file, or an error.
 func (kd *kubeEngine) Read(node, path string) (io.ReadCloser, error) {
-	return kd.kio.Read(kd.findPodName(node), ContainerAppName, path)
+	pod, ok := kd.findPod(node)
+	if !ok {
+		return nil, xerrors.Errorf("unknown node '%s'", node)
+	}
+
+	return kd.kio.Read(pod.Name, ContainerAppName, path)
 }
 
 // Write implements the IO interface to write the content in a distant file
@@ -668,7 +735,12 @@ func (kd *kubeEngine) Write(node, path string, content io.Reader) error {
 		}
 	}()
 
-	err := kd.kio.Write(kd.findPodName(node), ContainerAppName, path, reader)
+	pod, ok := kd.findPod(node)
+	if !ok {
+		return xerrors.Errorf("unknown node '%s'", node)
+	}
+
+	err := kd.kio.Write(pod.Name, ContainerAppName, path, reader)
 	if err != nil {
 		return fmt.Errorf("couldn't open stream: %w", err)
 	}
@@ -679,9 +751,59 @@ func (kd *kubeEngine) Write(node, path string, content io.Reader) error {
 // Exec implements the IO interface to execute a command on a node. It returns
 // the output if the command is a success, or it returns the error.
 func (kd *kubeEngine) Exec(node string, cmd []string, options sim.ExecOptions) error {
-	err := kd.kio.Exec(kd.findPodName(node), ContainerAppName, cmd, options)
+	pod, ok := kd.findPod(node)
+	if !ok {
+		return xerrors.Errorf("unknown node '%s'", node)
+	}
+
+	err := kd.kio.Exec(pod.Name, ContainerAppName, cmd, options)
 	if err != nil {
 		return fmt.Errorf("couldn't open stream: %w", err)
+	}
+
+	return nil
+}
+
+func (kd *kubeEngine) Disconnect(src, dst string) error {
+	dstPod, ok := kd.findPod(dst)
+	if !ok {
+		return xerrors.Errorf("unknown distant node '%s'", dst)
+	}
+
+	srcPod, ok := kd.findPod(src)
+	if !ok {
+		return xerrors.Errorf("unknown source node '%s'", src)
+	}
+
+	insert := fmt.Sprintf("iptables -I OUTPUT -d %s -j DROP", dstPod.Status.PodIP)
+
+	cmd := []string{"/bin/sh", "-c", insert}
+	opts := sim.ExecOptions{
+		Stdout: kd.writer,
+	}
+
+	err := kd.kio.Exec(srcPod.Name, ContainerMonitorName, cmd, opts)
+	if err != nil {
+		return xerrors.Errorf("couldn't execute command: %v", err)
+	}
+
+	return nil
+}
+
+func (kd *kubeEngine) Reconnect(node string) error {
+	pod, ok := kd.findPod(node)
+	if !ok {
+		return xerrors.Errorf("unknown node '%s'", node)
+	}
+
+	cmd := []string{"iptables", "-F"}
+	opts := sim.ExecOptions{
+		Stdout: kd.writer,
+	}
+
+	err := kd.kio.Exec(pod.Name, ContainerMonitorName, cmd, opts)
+	if err != nil {
+		return xerrors.Errorf("couldn't execute command: %v", err)
 	}
 
 	return nil
@@ -716,11 +838,11 @@ func int32Ptr(v int32) *int32 {
 	return &v
 }
 
-func (kd *kubeEngine) makeDeployment(node string, container apiv1.Container) *appsv1.Deployment {
+func (kd *kubeEngine) makeDeployment(node network.Node, container apiv1.Container) *appsv1.Deployment {
 	labels := map[string]string{
 		LabelApp:  AppName,
 		LabelID:   AppID,
-		LabelNode: node,
+		LabelNode: node.String(),
 	}
 
 	volumes := []apiv1.Volume{
@@ -762,7 +884,7 @@ func (kd *kubeEngine) makeDeployment(node string, container apiv1.Container) *ap
 					Labels: labels,
 				},
 				Spec: apiv1.PodSpec{
-					Hostname: node,
+					Hostname: node.String(),
 					Containers: []apiv1.Container{
 						container,
 						{
@@ -797,6 +919,14 @@ func (kd *kubeEngine) makeDeployment(node string, container apiv1.Container) *ap
 			},
 		},
 	}
+}
+
+func (kd *kubeEngine) fillNodeSelector(key string, value string, cfg *appsv1.Deployment) {
+	selectors := map[string]string{
+		key: value,
+	}
+
+	cfg.Spec.Template.Spec.NodeSelector = selectors
 }
 
 func tmpfsName(index int) string {

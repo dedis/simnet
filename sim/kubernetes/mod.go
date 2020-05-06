@@ -34,6 +34,9 @@ const (
 	// OptionCPUAlloc is the name of the option to change the default max limit
 	// of the amount of cpu allocated.
 	OptionCPUAlloc = "cpu-alloc"
+
+	// CleaningTimeout is the maximum amount the cleaning should take.
+	CleaningTimeout = 60 * time.Second
 )
 
 var newClientConfig = clientcmd.NewNonInteractiveDeferredLoadingClientConfig
@@ -224,6 +227,17 @@ func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
 // WriteStats fetches the stats of the nodes then write them into a JSON
 // formatted file.
 func (s *Strategy) WriteStats(ctx context.Context, filename string) error {
+	if !s.updated {
+		var err error
+		s.pods, err = s.engine.FetchPods()
+		if err != nil {
+			return xerrors.Errorf("couldn't fetch pods: %v", err)
+		}
+
+		s.executeTime = time.Unix(0, 0)
+		s.doneTime = time.Now()
+	}
+
 	stats := metrics.Stats{
 		Timestamp: s.executeTime.Unix(),
 		Tags:      s.engine.GetTags(),
@@ -270,7 +284,7 @@ func (s *Strategy) Clean(ctx context.Context) error {
 	} else {
 		defer w.Stop()
 
-		err = s.engine.WaitDeletion(w, 60*time.Second)
+		err = s.engine.WaitDeletion(w, CleaningTimeout)
 		if err != nil {
 			errs = append(errs, err)
 		}

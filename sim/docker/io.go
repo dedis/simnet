@@ -171,3 +171,12 @@ func (dio dockerio) Exec(container string, cmd []string, options sim.ExecOptions
 		}
 	}
 }
+
+func (dio dockerio) Disconnect(src, dst string) error {
+	// TODO: implement
+	return nil
+}
+
+func (dio dockerio) Reconnect(node string) error {
+	return nil
+}

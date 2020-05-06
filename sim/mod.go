@@ -30,6 +30,14 @@ type IO interface {
 	// Exec executes a command on a simulation node and returns the output if
 	// the command is successful, an error otherwise.
 	Exec(node string, cmd []string, options ExecOptions) error
+
+	// Disconnect provides an API to simulate a network failure between two
+	// nodes.
+	Disconnect(src, dst string) error
+
+	// Revert all the disconnection on the given node so that it will again be
+	// able to contact all the nodes.
+	Reconnect(node string) error
 }
 
 // NodeInfo is the element value of the array available in the execution

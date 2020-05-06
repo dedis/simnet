@@ -73,7 +73,6 @@ func TestSimulation_Run(t *testing.T) {
 	sim.out = buffer
 
 	args := []string{os.Args[0]}
-
 	require.NoError(t, sim.Run(args))
 
 	err := sim.Run([]string{})
@@ -102,4 +101,9 @@ func TestSimulation_Run(t *testing.T) {
 	err = sim.Run(args)
 	require.NoError(t, err)
 	require.Contains(t, buffer.String(), "An error occured during cleaning")
+
+	args = []string{os.Args[0], "--do-stats"}
+	stry.errStats = errors.New("oops")
+	err = sim.Run(args)
+	require.EqualError(t, err, "couldn't write statistics: oops")
 }

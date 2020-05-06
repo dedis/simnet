@@ -9,11 +9,13 @@ import (
 	"os"
 
 	"go.dedis.ch/simnet/sim"
+	"golang.org/x/xerrors"
 )
 
 var doCleaning bool
 var doDeploy bool
 var doExecute bool
+var doStats bool
 var vpnCommand string
 
 var errMissingArgs = errors.New("expect at least one argument")
@@ -44,11 +46,12 @@ func (s *Simulation) Run(args []string) error {
 	flagset.BoolVar(&doCleaning, "do-clean", false, "override the usual flow to only wipe simulation resources")
 	flagset.BoolVar(&doDeploy, "do-deploy", false, "override the usual flow to only deploy simulation resources")
 	flagset.BoolVar(&doExecute, "do-execute", false, "override the usual flow to only run the simulation round")
+	flagset.BoolVar(&doStats, "do-stats", false, "override the usual flow to only write statistics")
 	flagset.StringVar(&vpnCommand, "vpn", defaultOpenVPNPath, "path to the OpenVPN executable")
 
 	flagset.Parse(args[1:])
 
-	doAll := !doCleaning && !doDeploy && !doExecute
+	doAll := !doCleaning && !doDeploy && !doExecute && !doStats
 
 	fmt.Fprintf(s.out, "Using strategy %v\n", s.strategy)
 
@@ -87,6 +90,16 @@ func (s *Simulation) Run(args []string) error {
 		err = s.strategy.WriteStats(ctx, "result.json")
 		if err != nil {
 			return err
+		}
+	}
+
+	if doStats {
+		fmt.Fprintln(s.out, "Write statistics only")
+
+		// The user can request to only write the statistics to the file.
+		err := s.strategy.WriteStats(ctx, "result.json")
+		if err != nil {
+			return xerrors.Errorf("couldn't write statistics: %v", err)
 		}
 	}
 

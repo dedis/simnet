@@ -267,7 +267,7 @@ func (s *Strategy) configureContainer(
 	ctx context.Context,
 	c types.Container,
 	cfg *container.Config,
-	mapping map[network.Node]string,
+	mapping map[network.NodeID]string,
 	msgCh <-chan events.Message,
 	errCh <-chan error,
 ) error {
@@ -299,7 +299,7 @@ func (s *Strategy) configureContainer(
 		return fmt.Errorf("couldn't start netem container: %w", err)
 	}
 
-	rules := s.options.Topology.Rules(network.Node(containerName(c)), mapping)
+	rules := s.options.Topology.Rules(network.NodeID(containerName(c)), mapping)
 
 	enc := json.NewEncoder(conn.Conn)
 	err = enc.Encode(&rules)
@@ -343,9 +343,10 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 	}
 
 	// Create the mapping between node names and IPs.
-	mapping := make(map[network.Node]string)
+	mapping := make(map[network.NodeID]string)
 	for _, c := range s.containers {
-		mapping[network.Node(containerName(c))] = c.NetworkSettings.Networks[DefaultContainerNetwork].IPAddress
+		key := network.NodeID(containerName(c))
+		mapping[key] = c.NetworkSettings.Networks[DefaultContainerNetwork].IPAddress
 	}
 
 	// Caller is responsible to cancel the context.

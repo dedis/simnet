@@ -40,7 +40,7 @@ func NewAreaTopology(areas ...*Area) *AreaTopology {
 
 		// 1. Create the nodes of the area
 		for i := range nodes {
-			nodes[i] = Node(fmt.Sprintf("node%d", counter))
+			nodes[i] = Node{Name: NodeID(fmt.Sprintf("node%d", counter))}
 			counter++
 		}
 
@@ -95,14 +95,14 @@ func (t *AreaTopology) GetNodes() []Node {
 }
 
 // Rules returns the list of rules for a given node in the topology.
-func (t *AreaTopology) Rules(target Node, mapping map[Node]string) []Rule {
+func (t *AreaTopology) Rules(target NodeID, mapping map[NodeID]string) []Rule {
 	for _, area := range t.areas {
 		for node, links := range area.nodes {
-			if node == target {
+			if node.Name == target {
 				rules := make([]Rule, 0, len(links))
 				for _, link := range links {
 					rules = append(rules, Rule{
-						IP:    mapping[link.Distant],
+						IP:    mapping[link.Distant.Name],
 						Delay: link.Delay,
 						Loss:  link.Loss,
 					})

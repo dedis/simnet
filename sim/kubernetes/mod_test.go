@@ -236,6 +236,7 @@ func TestStrategy_WriteStats(t *testing.T) {
 func TestStrategy_WriteStatsFailures(t *testing.T) {
 	e := errors.New("read stats error")
 	stry := &Strategy{
+		updated: true,
 		pods:    []apiv1.Pod{{}},
 		engine:  &testEngine{errRead: e},
 		options: &sim.Options{},
