@@ -614,7 +614,11 @@ func (kd *kubeEngine) WaitDeletion(w watch.Interface, timeout time.Duration) err
 		case <-tick:
 			return errors.New("timeout")
 		case evt := <-w.ResultChan():
-			dpl := evt.Object.(*appsv1.Deployment)
+			dpl, ok := evt.Object.(*appsv1.Deployment)
+			if !ok {
+				continue
+			}
+
 			count[dpl.Name] = struct{}{}
 
 			if dpl.Status.AvailableReplicas == 0 && dpl.Status.UnavailableReplicas == 0 {

@@ -42,7 +42,7 @@ func (s *Simulation) Run(args []string) error {
 		return errMissingArgs
 	}
 
-	flagset := flag.NewFlagSet(args[0], flag.ExitOnError)
+	flagset := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	flagset.BoolVar(&doCleaning, "do-clean", false, "override the usual flow to only wipe simulation resources")
 	flagset.BoolVar(&doDeploy, "do-deploy", false, "override the usual flow to only deploy simulation resources")
 	flagset.BoolVar(&doExecute, "do-execute", false, "override the usual flow to only run the simulation round")

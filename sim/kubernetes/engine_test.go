@@ -556,6 +556,8 @@ func TestEngine_WaitDeletion(t *testing.T) {
 
 	w := watch.NewFakeWithChanSize(3, false)
 
+	w.Delete(nil)
+
 	w.Delete(&appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "app"},
 		Status: appsv1.DeploymentStatus{
