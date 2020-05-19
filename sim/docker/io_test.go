@@ -5,10 +5,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/ioutil"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/events"
@@ -174,6 +178,37 @@ func TestIO_ExecFailures(t *testing.T) {
 	require.Contains(t, err.Error(), "couldn't write to stdin")
 }
 
+func TestIO_FetchStats(t *testing.T) {
+	dio := newTestDockerIO(&testIOClient{})
+
+	file := filepath.Join(os.TempDir(), "simnet-docker-test")
+	defer os.Remove(file)
+
+	err := dio.FetchStats(time.Now(), time.Now(), file)
+	require.NoError(t, err)
+
+	buffer, err := ioutil.ReadFile(file)
+	require.NoError(t, err)
+	require.Equal(t, "{\"Timestamp\":0,\"Tags\":{},\"Nodes\":{}}\n", string(buffer))
+}
+
+func TestIO_MonitorContainers(t *testing.T) {
+	dio := newTestDockerIO(&testIOClient{})
+
+	containers := []types.Container{
+		{Names: []string{"/node0"}},
+	}
+
+	cancel, err := dio.monitorContainers(context.Background(), containers)
+	require.NoError(t, err)
+	cancel()
+
+	require.Len(t, dio.stats.Nodes, 1)
+	require.Equal(t, uint64(126), dio.stats.Nodes["node0"].Memory[0])
+	require.Equal(t, uint64(123), dio.stats.Nodes["node0"].TxBytes[0])
+	require.Equal(t, uint64(124), dio.stats.Nodes["node0"].RxBytes[0])
+}
+
 func newTestDockerIO(client *testIOClient) dockerio {
 	stats := metrics.NewStats()
 	return dockerio{
@@ -195,6 +230,7 @@ type testIOClient struct {
 	errContainerExecCreate error
 	errContainerExecAttach error
 	errContainerExecStart  error
+	errContainerStats      error
 }
 
 func (c *testIOClient) CopyFromContainer(context.Context, string, string) (io.ReadCloser, types.ContainerPathStat, error) {
@@ -251,4 +287,32 @@ func (c *testIOClient) ContainerExecAttach(context.Context, string, types.ExecCo
 
 func (c *testIOClient) ContainerExecStart(context.Context, string, types.ExecStartCheck) error {
 	return c.errContainerExecStart
+}
+
+func (c *testIOClient) ContainerStats(context.Context, string, bool) (types.ContainerStats, error) {
+	buffer := new(bytes.Buffer)
+
+	enc := json.NewEncoder(buffer)
+	enc.Encode(&types.StatsJSON{
+		Networks: map[string]types.NetworkStats{
+			"eth0": {
+				TxBytes: testStatBaseValue,
+				RxBytes: testStatBaseValue + 1,
+			},
+		},
+		Stats: types.Stats{
+			CPUStats: types.CPUStats{
+				SystemUsage: 5,
+				CPUUsage: types.CPUUsage{
+					TotalUsage:  testStatBaseValue + 2,
+					PercpuUsage: []uint64{0},
+				},
+			},
+			MemoryStats: types.MemoryStats{
+				Usage: testStatBaseValue + 3,
+			},
+		},
+	})
+
+	return types.ContainerStats{Body: ioutil.NopCloser(buffer)}, c.errContainerStats
 }

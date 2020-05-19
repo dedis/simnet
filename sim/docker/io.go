@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/sim"
+	"golang.org/x/xerrors"
 )
 
 type dockerio struct {
@@ -197,18 +198,19 @@ func (dio *dockerio) FetchStats(from, end time.Time, filename string) error {
 
 	err := os.MkdirAll(dir, 0755)
 	if err != nil {
-		return err
+		return xerrors.Errorf("couldn't create directory: %v", err)
 	}
 
 	file, err := os.Create(filename)
 	if err != nil {
-		return err
+		return xerrors.Errorf("couldn't create file: %v", err)
 	}
 
+	// TODO: time range
 	enc := json.NewEncoder(file)
 	err = enc.Encode(&dio.stats)
 	if err != nil {
-		return fmt.Errorf("couldn't encode the stats: %w", err)
+		return xerrors.Errorf("couldn't encode the stats: %w", err)
 	}
 
 	return nil
@@ -231,7 +233,7 @@ func (dio *dockerio) monitorContainers(ctx context.Context, containers []types.C
 		closer, err := dio.monitorContainer(ctx, container)
 		if err != nil {
 			globalCloser()
-			return nil, err
+			return nil, xerrors.Errorf("couldn't listen stats: %v", err)
 		}
 
 		closers = append(closers, closer)
@@ -243,7 +245,7 @@ func (dio *dockerio) monitorContainers(ctx context.Context, containers []types.C
 func (dio *dockerio) monitorContainer(ctx context.Context, container types.Container) (func(), error) {
 	resp, err := dio.cli.ContainerStats(ctx, container.ID, true)
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("couldn't get stats: %v", err)
 	}
 
 	dec := json.NewDecoder(resp.Body)

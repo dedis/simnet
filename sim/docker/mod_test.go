@@ -588,7 +588,6 @@ type testClient struct {
 	errContainerStart  error
 	errContainerStop   error
 	errContainerList   error
-	errContainerStats  error
 	errContainerLogs   error
 	errAttachConn      error
 	errEvent           error
@@ -602,7 +601,6 @@ func (c *testClient) resetErrors() {
 	c.errContainerStart = nil
 	c.errContainerStop = nil
 	c.errContainerList = nil
-	c.errContainerStats = nil
 	c.errContainerLogs = nil
 	c.errAttachConn = nil
 	c.errEvent = nil
@@ -667,30 +665,6 @@ func (c *testClient) ContainerList(ctx context.Context, options types.ContainerL
 	}
 
 	return containers, c.errContainerList
-}
-
-func (c *testClient) ContainerStats(context.Context, string, bool) (types.ContainerStats, error) {
-	buffer := new(bytes.Buffer)
-
-	enc := json.NewEncoder(buffer)
-	enc.Encode(&types.StatsJSON{
-		Networks: map[string]types.NetworkStats{
-			"eth0": {
-				TxBytes: testStatBaseValue,
-				RxBytes: testStatBaseValue + 1,
-			},
-		},
-		Stats: types.Stats{
-			CPUStats: types.CPUStats{
-				CPUUsage: types.CPUUsage{TotalUsage: testStatBaseValue + 2},
-			},
-			MemoryStats: types.MemoryStats{
-				Usage: testStatBaseValue + 3,
-			},
-		},
-	})
-
-	return types.ContainerStats{Body: ioutil.NopCloser(buffer)}, c.errContainerStats
 }
 
 func (c *testClient) ContainerStop(ctx context.Context, id string, t *time.Duration) error {

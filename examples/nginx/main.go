@@ -59,8 +59,6 @@ func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	fmt.Printf("Nodes: %v\n", nodes)
 
-	start := time.Now()
-
 	for _, node := range nodes {
 		simio.Tag(node.Name)
 
@@ -82,7 +80,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 
 	file := filepath.Join(os.TempDir(), "simnet-nginx")
 
-	err := simio.FetchStats(start, time.Now(), file)
+	err := simio.FetchStats(time.Now().Add(-5*time.Second), time.Now(), file)
 	if err != nil {
 		return err
 	}
