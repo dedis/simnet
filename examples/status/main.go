@@ -13,6 +13,7 @@ import (
 	"go.dedis.ch/onet/v3/app"
 	"go.dedis.ch/onet/v3/network"
 	"go.dedis.ch/simnet"
+	net "go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
 	"go.dedis.ch/simnet/sim/kubernetes"
 	"golang.org/x/xerrors"
@@ -63,6 +64,7 @@ func main() {
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
 	options := []sim.Option{
+		sim.WithTopology(net.NewSimpleTopology(3, 25*time.Millisecond)),
 		sim.WithImage(
 			"dedis/conode:latest",
 			[]string{"bash", "-c"},
