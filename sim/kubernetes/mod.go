@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/sim"
 	"golang.org/x/xerrors"
 	apiv1 "k8s.io/api/core/v1"
@@ -238,32 +237,10 @@ func (s *Strategy) WriteStats(ctx context.Context, filename string) error {
 		s.doneTime = time.Now()
 	}
 
-	stats := metrics.Stats{
-		Timestamp: s.executeTime.Unix(),
-		Tags:      s.engine.GetTags(),
-		Nodes:     make(map[string]metrics.NodeStats),
-	}
-
-	for _, pod := range s.pods {
-		ns, err := s.engine.ReadStats(pod.Name, s.executeTime, s.doneTime)
-		if err != nil {
-			return err
-		}
-
-		stats.Nodes[pod.Name] = ns
-	}
-
-	f, err := os.Create(filepath.Join(s.options.OutputDir, filename))
+	out := filepath.Join(s.options.OutputDir, filename)
+	err := s.engine.FetchStats(s.executeTime, s.doneTime, out)
 	if err != nil {
-		return err
-	}
-
-	defer f.Close()
-
-	enc := s.makeEncoder(f)
-	err = enc.Encode(&stats)
-	if err != nil {
-		return err
+		return xerrors.Errorf("couldn't fetch the stats: %v", err)
 	}
 
 	return nil

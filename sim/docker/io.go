@@ -4,9 +4,14 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
+	"os"
+	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -17,28 +22,31 @@ import (
 )
 
 type dockerio struct {
-	cli   client.APIClient
-	stats *metrics.Stats
+	cli       client.APIClient
+	stats     metrics.Stats
+	statsLock sync.Mutex
 }
 
-func newDockerIO(cli client.APIClient, stats *metrics.Stats) dockerio {
-	return dockerio{
+func newDockerIO(cli client.APIClient) *dockerio {
+	return &dockerio{
 		cli:   cli,
-		stats: stats,
+		stats: metrics.NewStats(),
 	}
 }
 
 // Tag saves the tag using the current timestamp as the key. It allows the
 // drawing of plots with points in time tagged.
-func (dio dockerio) Tag(name string) {
+func (dio *dockerio) Tag(name string) {
+	dio.statsLock.Lock()
 	key := time.Now().UnixNano()
 	dio.stats.Tags[key] = name
+	dio.statsLock.Unlock()
 }
 
 // Read reads a file in the container at the given path. It returns a reader
 // that will eventually deliver the content of the file. The caller is
 // responsible for closing the stream.
-func (dio dockerio) Read(container, path string) (io.ReadCloser, error) {
+func (dio *dockerio) Read(container, path string) (io.ReadCloser, error) {
 	ctx := context.Background()
 
 	reader, _, err := dio.cli.CopyFromContainer(ctx, container, path)
@@ -57,7 +65,7 @@ func (dio dockerio) Read(container, path string) (io.ReadCloser, error) {
 // Write writes a file in the container at the given path using the content. It
 // will read until it reaches EOF and it will return an error if something bad
 // has happened.
-func (dio dockerio) Write(container, path string, content io.Reader) error {
+func (dio *dockerio) Write(container, path string, content io.Reader) error {
 	ctx := context.Background()
 
 	reader, writer := io.Pipe()
@@ -88,7 +96,7 @@ func (dio dockerio) Write(container, path string, content io.Reader) error {
 }
 
 // Exec executes a command in the container.
-func (dio dockerio) Exec(container string, cmd []string, options sim.ExecOptions) error {
+func (dio *dockerio) Exec(container string, cmd []string, options sim.ExecOptions) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -172,11 +180,121 @@ func (dio dockerio) Exec(container string, cmd []string, options sim.ExecOptions
 	}
 }
 
-func (dio dockerio) Disconnect(src, dst string) error {
+func (dio *dockerio) Disconnect(src, dst string) error {
 	// TODO: implement
 	return nil
 }
 
-func (dio dockerio) Reconnect(node string) error {
+func (dio *dockerio) Reconnect(node string) error {
 	return nil
+}
+
+func (dio *dockerio) FetchStats(from, end time.Time, filename string) error {
+	dio.statsLock.Lock()
+	defer dio.statsLock.Unlock()
+
+	dir, _ := filepath.Split(filename)
+
+	err := os.MkdirAll(dir, 0755)
+	if err != nil {
+		return err
+	}
+
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+
+	enc := json.NewEncoder(file)
+	err = enc.Encode(&dio.stats)
+	if err != nil {
+		return fmt.Errorf("couldn't encode the stats: %w", err)
+	}
+
+	return nil
+}
+
+func (dio *dockerio) monitorContainers(ctx context.Context, containers []types.Container) (func(), error) {
+	dio.statsLock.Lock()
+	dio.stats.Timestamp = time.Now().Unix()
+	dio.statsLock.Unlock()
+
+	closers := make([]func(), 0, len(containers))
+
+	globalCloser := func() {
+		for _, closer := range closers {
+			closer()
+		}
+	}
+
+	for _, container := range containers {
+		closer, err := dio.monitorContainer(ctx, container)
+		if err != nil {
+			globalCloser()
+			return nil, err
+		}
+
+		closers = append(closers, closer)
+	}
+
+	return globalCloser, nil
+}
+
+func (dio *dockerio) monitorContainer(ctx context.Context, container types.Container) (func(), error) {
+	resp, err := dio.cli.ContainerStats(ctx, container.ID, true)
+	if err != nil {
+		return nil, err
+	}
+
+	dec := json.NewDecoder(resp.Body)
+	ns := &metrics.NodeStats{}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		for {
+			data := &types.StatsJSON{}
+			err := dec.Decode(data)
+			if err != nil {
+				wg.Done()
+				return
+			}
+
+			ns.Timestamps = append(ns.Timestamps, time.Now().Unix())
+			ns.RxBytes = append(ns.RxBytes, data.Networks["eth0"].RxBytes)
+			ns.TxBytes = append(ns.TxBytes, data.Networks["eth0"].TxBytes)
+
+			prev := data.PreCPUStats.CPUUsage.TotalUsage
+			prevSys := data.PreCPUStats.SystemUsage
+			ns.CPU = append(ns.CPU, uint64(calculateCPUPercent(prev, prevSys, data)))
+			ns.Memory = append(ns.Memory, data.MemoryStats.Usage)
+
+			dio.statsLock.Lock()
+			dio.stats.Nodes[containerName(container)] = *ns
+			dio.statsLock.Unlock()
+		}
+	}()
+
+	closer := func() {
+		resp.Body.Close()
+		wg.Wait()
+	}
+
+	return closer, nil
+}
+
+// https://github.com/moby/moby/blob/eb131c5383db8cac633919f82abad86c99bffbe5/cli/command/container/stats_helpers.go#L175-L188
+func calculateCPUPercent(previousCPU, previousSystem uint64, v *types.StatsJSON) int {
+	var (
+		cpuPercent = 0.0
+		// calculate the change for the cpu usage of the container in between readings
+		cpuDelta = float64(v.CPUStats.CPUUsage.TotalUsage) - float64(previousCPU)
+		// calculate the change for the entire system between readings
+		systemDelta = float64(v.CPUStats.SystemUsage) - float64(previousSystem)
+	)
+
+	if systemDelta > 0.0 && cpuDelta > 0.0 {
+		cpuPercent = (cpuDelta / systemDelta) * float64(len(v.CPUStats.CPUUsage.PercpuUsage)) * 100.0
+	}
+	return int(math.Ceil(cpuPercent * 100))
 }

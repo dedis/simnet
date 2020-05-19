@@ -6,7 +6,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -228,39 +227,6 @@ func TestStrategy_WriteStats(t *testing.T) {
 	file := "data.json"
 	err = stry.WriteStats(context.Background(), file)
 	require.NoError(t, err)
-
-	_, err = os.Stat(filepath.Join(dir, file))
-	require.NoError(t, err)
-}
-
-func TestStrategy_WriteStatsFailures(t *testing.T) {
-	e := errors.New("read stats error")
-	stry := &Strategy{
-		updated: true,
-		pods:    []apiv1.Pod{{}},
-		engine:  &testEngine{errRead: e},
-		options: &sim.Options{},
-	}
-
-	err := stry.WriteStats(context.Background(), "")
-	require.Error(t, err)
-	require.Equal(t, e, err)
-
-	stry.engine = &testEngine{}
-
-	err = stry.WriteStats(context.Background(), "")
-	require.Error(t, err)
-	require.IsType(t, (*os.PathError)(nil), err)
-
-	dir, err := ioutil.TempDir(os.TempDir(), "simnet-kubernetes-test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	stry.makeEncoder = newBadEncoder
-	stry.options.OutputDir = dir
-	err = stry.WriteStats(context.Background(), "data.json")
-	require.Error(t, err)
-	require.Equal(t, "encoding error", err.Error())
 }
 
 func TestStrategy_Clean(t *testing.T) {
@@ -384,6 +350,10 @@ func (te *testEngine) Write(node, path string, content io.Reader) error {
 }
 
 func (te *testEngine) Exec(node string, cmd []string, options sim.ExecOptions) error {
+	return nil
+}
+
+func (te *testEngine) FetchStats(start, end time.Time, filename string) error {
 	return nil
 }
 

@@ -3,6 +3,7 @@ package sim
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // ExecOptions is the options to pass to a command execution.
@@ -38,6 +39,9 @@ type IO interface {
 	// Revert all the disconnection on the given node so that it will again be
 	// able to contact all the nodes.
 	Reconnect(node string) error
+
+	// FetchStats gathers the statistics from the nodes and write into filename.
+	FetchStats(from, to time.Time, filename string) error
 }
 
 // NodeInfo is the element value of the array available in the execution

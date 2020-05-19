@@ -10,7 +10,6 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -22,7 +21,6 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/simnet/daemon"
-	"go.dedis.ch/simnet/metrics"
 	snet "go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
 )
@@ -357,20 +355,6 @@ func TestStrategy_Execute(t *testing.T) {
 		netcfg := s.containers[i].NetworkSettings.Networks[DefaultContainerNetwork]
 		require.Equal(t, netcfg.IPAddress, node.Address)
 	}
-
-	require.InDelta(t, time.Now().Unix(), s.stats.Timestamp, float64(time.Second.Milliseconds()))
-	require.Len(t, s.stats.Nodes, len(s.containers))
-
-	ns := s.stats.Nodes["node0"]
-	require.Len(t, ns.Timestamps, 1)
-	require.Len(t, ns.TxBytes, 1)
-	require.Equal(t, ns.TxBytes[0], testStatBaseValue)
-	require.Len(t, ns.RxBytes, 1)
-	require.Equal(t, ns.RxBytes[0], testStatBaseValue+1)
-	require.Len(t, ns.CPU, 1)
-	require.Equal(t, ns.CPU[0], testStatBaseValue+2)
-	require.Len(t, ns.Memory, 1)
-	require.Equal(t, ns.Memory[0], testStatBaseValue+3)
 }
 
 func TestStrategy_ExecuteFailure(t *testing.T) {
@@ -401,21 +385,6 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 	err = s.Execute(context.Background(), &testRound{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, e))
-}
-
-func TestStrategy_MonitorContainerFailures(t *testing.T) {
-	client := &testClient{numContainers: 3}
-	s, clean := newTestStrategyWithClient(t, client)
-	defer clean()
-
-	s.containers = []types.Container{makeTestContainer("id:node0")}
-
-	e := errors.New("monitor container error")
-	client.errContainerStats = e
-
-	err := s.Execute(context.Background(), &testRound{})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e), err.Error())
 }
 
 func TestStrategy_StreamLogsFailures(t *testing.T) {
@@ -452,43 +421,7 @@ func TestStrategy_StreamLogsFailures(t *testing.T) {
 }
 
 func TestStrategy_WriteStats(t *testing.T) {
-	s, clean := newTestStrategy(t)
-	defer clean()
-
-	s.stats = metrics.Stats{Timestamp: time.Now().Unix()}
-	buffer := new(bytes.Buffer)
-	enc := json.NewEncoder(buffer)
-	require.NoError(t, enc.Encode(s.stats))
-
-	err := s.WriteStats(context.Background(), "abc")
-	require.NoError(t, err)
-
-	content, err := ioutil.ReadFile(filepath.Join(s.options.OutputDir, "abc"))
-	require.Equal(t, buffer.String(), string(content))
-}
-
-func TestStrategy_WriteStatsFailures(t *testing.T) {
-	s, clean := newTestStrategy(t)
-	defer clean()
-
-	e := errors.New("encoder error")
-	s.encoder = func(io.Writer, *metrics.Stats) error {
-		return e
-	}
-
-	err := s.WriteStats(context.Background(), "1")
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e), err.Error())
-
-	s.encoder = jsonEncoder
-	err = s.WriteStats(context.Background(), "\000")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid argument")
-
-	s.options.OutputDir = "\000"
-	err = s.WriteStats(context.Background(), "")
-	require.Error(t, err)
-	require.EqualError(t, err, "mkdir \x00: invalid argument")
+	// TODO:
 }
 
 func TestStrategy_Clean(t *testing.T) {
@@ -798,7 +731,7 @@ func (c *testClient) Events(ctx context.Context, options types.EventsOptions) (<
 }
 
 type testDockerIO struct {
-	sim.IO
+	IO
 	err error
 }
 
@@ -812,6 +745,14 @@ func (dio testDockerIO) Write(container, path string, content io.Reader) error {
 
 func (dio testDockerIO) Exec(container string, cmd []string, options sim.ExecOptions) error {
 	return nil
+}
+
+func (dio testDockerIO) FetchStats(start, end time.Time, filename string) error {
+	return nil
+}
+
+func (dio testDockerIO) monitorContainers(context.Context, []types.Container) (func(), error) {
+	return func() {}, nil
 }
 
 const (
@@ -864,8 +805,6 @@ func newTestStrategy(t *testing.T) (*Strategy, func()) {
 			sim.WithTmpFS("/storage", 2*sim.GB),
 		}),
 		containers: make([]types.Container, 0),
-		stats:      metrics.NewStats(),
-		encoder:    jsonEncoder,
 	}, cleaner
 }
 

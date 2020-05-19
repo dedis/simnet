@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -12,7 +13,6 @@ import (
 	"go.dedis.ch/simnet"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
-	"go.dedis.ch/simnet/sim/docker"
 	"go.dedis.ch/simnet/sim/kubernetes"
 	"golang.org/x/xerrors"
 )
@@ -59,6 +59,8 @@ func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	fmt.Printf("Nodes: %v\n", nodes)
 
+	start := time.Now()
+
 	for _, node := range nodes {
 		simio.Tag(node.Name)
 
@@ -75,7 +77,14 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 		}
 
 		fmt.Printf("Found page of length %d bytes for %s\n", len(body), node.Name)
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
+	}
+
+	file := filepath.Join(os.TempDir(), "simnet-nginx")
+
+	err := simio.FetchStats(start, time.Now(), file)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -97,10 +106,10 @@ func main() {
 		kubernetes.WithResources("20m", "64Mi"),
 	}
 
-	// kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
-	// engine, err := kubernetes.NewStrategy(kubeconfig, options...)
-	engine, err := docker.NewStrategy(options...)
+	engine, err := kubernetes.NewStrategy(kubeconfig, options...)
+	// engine, err := docker.NewStrategy(options...)
 	if err != nil {
 		panic(err)
 	}

@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/buger/goterm"
@@ -20,7 +19,6 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"go.dedis.ch/simnet/daemon"
-	"go.dedis.ch/simnet/metrics"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
 	"golang.org/x/xerrors"
@@ -63,16 +61,15 @@ type Event struct {
 	Progress string `json:"progress"`
 }
 
-// Encoder is the function used to encode the statistics in a given format.
-type Encoder func(io.Writer, *metrics.Stats) error
-
-func jsonEncoder(writer io.Writer, stats *metrics.Stats) error {
-	enc := json.NewEncoder(writer)
-	return enc.Encode(stats)
-}
-
 var makeDockerClient = func() (client.APIClient, error) {
 	return client.NewEnvClient()
+}
+
+// IO is an extension of sim.IO.
+type IO interface {
+	sim.IO
+
+	monitorContainers(context.Context, []types.Container) (func(), error)
 }
 
 // Strategy implements the strategy interface for running simulations inside a
@@ -80,12 +77,9 @@ var makeDockerClient = func() (client.APIClient, error) {
 type Strategy struct {
 	out        io.Writer
 	cli        client.APIClient
-	dio        sim.IO
+	dio        IO
 	options    *sim.Options
 	containers []types.Container
-	stats      metrics.Stats
-	statsLock  sync.Mutex
-	encoder    Encoder
 	vpn        VPN
 
 	// Depending on which step the simulation is booting, it is necessary
@@ -105,17 +99,14 @@ func NewStrategy(opts ...sim.Option) (*Strategy, error) {
 	}
 
 	options := sim.NewOptions(opts)
-	stats := metrics.NewStats()
 
 	return &Strategy{
 		out:        os.Stdout,
 		cli:        cli,
 		vpn:        newDockerOpenVPN(cli, os.Stdout, options),
-		dio:        newDockerIO(cli, &stats),
+		dio:        newDockerIO(cli),
 		options:    options,
 		containers: make([]types.Container, 0),
-		stats:      stats,
-		encoder:    jsonEncoder,
 	}, nil
 }
 
@@ -420,46 +411,6 @@ func (s *Strategy) makeExecutionContext() []sim.NodeInfo {
 	return nodes
 }
 
-func (s *Strategy) monitorContainer(ctx context.Context, container types.Container) (func(), error) {
-	resp, err := s.cli.ContainerStats(ctx, container.ID, true)
-	if err != nil {
-		return nil, err
-	}
-
-	dec := json.NewDecoder(resp.Body)
-	ns := &metrics.NodeStats{}
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-
-	go func() {
-		for {
-			data := &types.StatsJSON{}
-			err := dec.Decode(data)
-			if err != nil {
-				wg.Done()
-				return
-			}
-
-			ns.Timestamps = append(ns.Timestamps, time.Now().Unix())
-			ns.RxBytes = append(ns.RxBytes, data.Networks["eth0"].RxBytes)
-			ns.TxBytes = append(ns.TxBytes, data.Networks["eth0"].TxBytes)
-			ns.CPU = append(ns.CPU, data.CPUStats.CPUUsage.TotalUsage)
-			ns.Memory = append(ns.Memory, data.MemoryStats.Usage)
-
-			s.statsLock.Lock()
-			s.stats.Nodes[containerName(container)] = *ns
-			s.statsLock.Unlock()
-		}
-	}()
-
-	closer := func() {
-		resp.Body.Close()
-		wg.Wait()
-	}
-
-	return closer, nil
-}
-
 func (s *Strategy) streamLogs(ctx context.Context) error {
 	if s.streamingLogs {
 		return nil
@@ -513,24 +464,12 @@ func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
 		return fmt.Errorf("couldn't update the states: %w", err)
 	}
 
-	closers := make([]func(), 0, len(s.containers))
-
-	// It's important to close any existing stream even if an error
-	// occurred.
-	defer func() {
-		for _, closer := range closers {
-			closer()
-		}
-	}()
-
-	for _, container := range s.containers {
-		closer, err := s.monitorContainer(ctx, container)
-		if err != nil {
-			return err
-		}
-
-		closers = append(closers, closer)
+	closer, err := s.dio.monitorContainers(ctx, s.containers)
+	if err != nil {
+		return err
 	}
+
+	defer closer()
 
 	// Listen for the container logs and write the output in separate files
 	// for each of them in the output folder.
@@ -538,10 +477,6 @@ func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
 	if err != nil {
 		return xerrors.Errorf("couldn't stream logs: %v", err)
 	}
-
-	s.statsLock.Lock()
-	s.stats.Timestamp = time.Now().Unix()
-	s.statsLock.Unlock()
 
 	nodes := s.makeExecutionContext()
 
@@ -564,22 +499,10 @@ func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
 
 // WriteStats writes the statistics of the nodes to the file.
 func (s *Strategy) WriteStats(ctx context.Context, filename string) error {
-	s.statsLock.Lock()
-	defer s.statsLock.Unlock()
-
-	err := os.MkdirAll(s.options.OutputDir, 0755)
+	out := filepath.Join(s.options.OutputDir, filename)
+	err := s.dio.FetchStats(time.Unix(0, 0), time.Now(), out)
 	if err != nil {
-		return err
-	}
-
-	file, err := os.Create(filepath.Join(s.options.OutputDir, filename))
-	if err != nil {
-		return err
-	}
-
-	err = s.encoder(file, &s.stats)
-	if err != nil {
-		return fmt.Errorf("couldn't encode the stats: %w", err)
+		return xerrors.Errorf("couldn't fetch stats: %v", err)
 	}
 
 	fmt.Fprintln(s.out, "Write statistics... Done.")

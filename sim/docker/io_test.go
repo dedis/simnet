@@ -178,7 +178,7 @@ func newTestDockerIO(client *testIOClient) dockerio {
 	stats := metrics.NewStats()
 	return dockerio{
 		cli:   client,
-		stats: &stats,
+		stats: stats,
 	}
 }
 

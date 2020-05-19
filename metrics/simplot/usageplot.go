@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 
 	"go.dedis.ch/simnet/metrics"
@@ -17,7 +16,6 @@ type mapper func(index int, ns metrics.NodeStats) float64
 
 // usagePlot is a plot factory that can create plot from usage statistics.
 type usagePlot struct {
-	regex   *regexp.Regexp
 	mappers map[string]mapper
 
 	factory   func() (*plot.Plot, error)
@@ -48,7 +46,6 @@ func newUsagePlot(tx, rx, cpu, mem bool) usagePlot {
 	}
 
 	return usagePlot{
-		regex:     regexp.MustCompile("node[0-9]+"),
 		mappers:   mappers,
 		factory:   plot.New,
 		processor: plotutil.AddLinePoints,
@@ -68,11 +65,10 @@ func (p usagePlot) Process(stats *metrics.Stats) (*plot.Plot, error) {
 	lines := make([]interface{}, 0)
 	for _, node := range keys {
 		ns := stats.Nodes[node]
-		label := p.regex.FindString(node)
 
 		for prefix, m := range p.mappers {
 			points := makePoints(ns, m)
-			lines = append(lines, label+prefix, points)
+			lines = append(lines, node+prefix, points)
 		}
 	}
 

@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -115,6 +116,7 @@ type engine interface {
 	Exec(node string, cmd []string, options sim.ExecOptions) error
 	Disconnect(string, string) error
 	Reconnect(string) error
+	FetchStats(start, end time.Time, filename string) error
 }
 
 type kubeEngine struct {
@@ -809,6 +811,40 @@ func (kd *kubeEngine) Reconnect(node string) error {
 	err := kd.kio.Exec(pod.Name, ContainerMonitorName, cmd, opts)
 	if err != nil {
 		return xerrors.Errorf("couldn't execute command: %v", err)
+	}
+
+	return nil
+}
+
+func (kd *kubeEngine) FetchStats(start, end time.Time, filename string) error {
+	stats := metrics.Stats{
+		Timestamp: start.Unix(),
+		Tags:      kd.GetTags(),
+		Nodes:     make(map[string]metrics.NodeStats),
+	}
+
+	for _, pod := range kd.pods {
+		ns, err := kd.ReadStats(pod.Name, start, end)
+		if err != nil {
+			return err
+		}
+
+		name := pod.Labels[LabelNode]
+
+		stats.Nodes[name] = ns
+	}
+
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+
+	defer f.Close()
+
+	enc := json.NewEncoder(f)
+	err = enc.Encode(&stats)
+	if err != nil {
+		return err
 	}
 
 	return nil
