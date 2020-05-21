@@ -42,7 +42,7 @@ type simRound struct{}
 func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	// Example how to disconnect a one-way link so that node0 cannot contact
 	// node1 anymore.
-	err := simio.Disconnect("per-au", "tul-us")
+	err := simio.Disconnect("per-au", "tul-us", "sql-us", "ind-us")
 	if err != nil {
 		return xerrors.Errorf("couldn't disconnect: %v", err)
 	}

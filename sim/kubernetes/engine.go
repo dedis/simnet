@@ -114,7 +114,7 @@ type engine interface {
 	Read(pod, path string) (io.ReadCloser, error)
 	Write(node, path string, content io.Reader) error
 	Exec(node string, cmd []string, options sim.ExecOptions) error
-	Disconnect(string, string) error
+	Disconnect(string, ...string) error
 	Reconnect(string) error
 	FetchStats(start, end time.Time, filename string) error
 }
@@ -771,10 +771,15 @@ func (kd *kubeEngine) Exec(node string, cmd []string, options sim.ExecOptions) e
 	return nil
 }
 
-func (kd *kubeEngine) Disconnect(src, dst string) error {
-	dstPod, ok := kd.findPod(dst)
-	if !ok {
-		return xerrors.Errorf("unknown distant node '%s'", dst)
+func (kd *kubeEngine) Disconnect(src string, targets ...string) error {
+	cmds := make([]string, 0, len(targets))
+	for _, target := range targets {
+		dstPod, ok := kd.findPod(target)
+		if !ok {
+			return xerrors.Errorf("unknown distant node '%s'", target)
+		}
+
+		cmds = append(cmds, fmt.Sprintf("iptables -I OUTPUT -d %s -j DROP", dstPod.Status.PodIP))
 	}
 
 	srcPod, ok := kd.findPod(src)
@@ -782,9 +787,7 @@ func (kd *kubeEngine) Disconnect(src, dst string) error {
 		return xerrors.Errorf("unknown source node '%s'", src)
 	}
 
-	insert := fmt.Sprintf("iptables -I OUTPUT -d %s -j DROP", dstPod.Status.PodIP)
-
-	cmd := []string{"/bin/sh", "-c", insert}
+	cmd := []string{"/bin/sh", "-c", strings.Join(cmds, " && ")}
 	opts := sim.ExecOptions{
 		Stdout: kd.writer,
 	}

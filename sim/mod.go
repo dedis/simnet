@@ -34,7 +34,7 @@ type IO interface {
 
 	// Disconnect provides an API to simulate a network failure between two
 	// nodes.
-	Disconnect(src, dst string) error
+	Disconnect(src string, targets ...string) error
 
 	// Revert all the disconnection on the given node so that it will again be
 	// able to contact all the nodes.

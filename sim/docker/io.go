@@ -181,7 +181,7 @@ func (dio *dockerio) Exec(container string, cmd []string, options sim.ExecOption
 	}
 }
 
-func (dio *dockerio) Disconnect(src, dst string) error {
+func (dio *dockerio) Disconnect(src string, targets ...string) error {
 	// TODO: implement
 	return nil
 }

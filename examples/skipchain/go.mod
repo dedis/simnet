@@ -10,5 +10,5 @@ require (
 	github.com/cpuguy83/go-md2man v1.0.10 // indirect
 	go.dedis.ch/cothority/v3 v3.4.3
 	go.dedis.ch/onet/v3 v3.1.1
-	go.dedis.ch/simnet v0.3.1
+	go.dedis.ch/simnet v0.3.9
 )
