@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gonum.org/v1/gonum/stat"
 )
 
 // Stats represents the JSON structure of the statistics written for each node.
@@ -107,6 +109,28 @@ func (ns NodeStats) Average() (float64, float64, float64, float64) {
 	arx := float64(rx) / length
 
 	return acpu, amem, atx, arx
+}
+
+// StdDev returns the standard deviation for each column.
+func (ns NodeStats) StdDev() (float64, float64, float64, float64) {
+	cpu := make([]float64, len(ns.Timestamps))
+	mem := make([]float64, len(ns.Timestamps))
+	tx := make([]float64, len(ns.Timestamps))
+	rx := make([]float64, len(ns.Timestamps))
+
+	for i := range ns.Timestamps {
+		cpu[i] = float64(ns.CPU[i])
+		mem[i] = float64(ns.Memory[i])
+		tx[i] = float64(ns.TxBytes[i])
+		rx[i] = float64(ns.RxBytes[i])
+	}
+
+	stddevcpu := stat.StdDev(cpu, nil)
+	stddevmem := stat.StdDev(mem, nil)
+	stddevtx := stat.StdDev(tx, nil)
+	stddevrx := stat.StdDev(rx, nil)
+
+	return stddevcpu, stddevmem, stddevtx, stddevrx
 }
 
 func parseInteger(value string) (uint64, error) {

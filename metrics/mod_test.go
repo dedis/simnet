@@ -60,3 +60,19 @@ func TestNodeStats_Average(t *testing.T) {
 	require.Equal(t, float64(2.5), tx)
 	require.Equal(t, float64(2.5), rx)
 }
+
+func TestNodeStats_StdDev(t *testing.T) {
+	ns := NodeStats{
+		Timestamps: []int64{0, 0, 0, 0},
+		CPU:        []uint64{1, 3, 1, 3},
+		Memory:     []uint64{1, 3, 1, 3},
+		TxBytes:    []uint64{1, 3, 1, 3},
+		RxBytes:    []uint64{1, 3, 1, 3},
+	}
+
+	cpu, mem, tx, rx := ns.StdDev()
+	require.InDelta(t, float64(1.15), cpu, 0.1)
+	require.InDelta(t, float64(1.15), mem, 0.1)
+	require.InDelta(t, float64(1.15), tx, 0.1)
+	require.InDelta(t, float64(1.15), rx, 0.1)
+}

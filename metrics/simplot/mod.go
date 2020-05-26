@@ -166,7 +166,7 @@ func printMax(input string) error {
 	forEachOrdered(stats, func(node string, ns metrics.NodeStats) {
 		cpu, mem, tx, rx := ns.Max()
 
-		fmt.Printf("Node <%s>\t: %8d\t%s\t%s\t%s\n", node, cpu,
+		fmt.Printf("Node <%s>\t: %8.2f%%\t%s\t%s\t%s\n", node, float64(cpu)/100.0,
 			int2human(float64(mem)), int2human(float64(rx)), int2human(float64(tx)))
 	})
 
@@ -179,13 +179,18 @@ func printAverage(input string) error {
 		return err
 	}
 
-	fmt.Println("Average of [CPU Memory Rx Tx]:")
+	fmt.Println("Average of [CPU Memory Rx Tx] (Standard deviation):")
 
 	forEachOrdered(stats, func(node string, ns metrics.NodeStats) {
 		cpu, mem, tx, rx := ns.Average()
+		stddevcpu, stddevmem, stddevtx, stddevrx := ns.StdDev()
 
-		fmt.Printf("Node <%s>\t: %8.2f\t%s\t%s\t%s\n", node, cpu,
-			int2human(mem), int2human(rx), int2human(tx))
+		fmt.Printf("Node <%s>\t: %8.2f%% (%.2f%%)\t%s (%s)\t%s (%s)\t%s (%s)\n",
+			node,
+			cpu/100, stddevcpu/100,
+			int2human(mem), int2human(stddevmem),
+			int2human(rx), int2human(stddevrx),
+			int2human(tx), int2human(stddevtx))
 	})
 
 	return nil
