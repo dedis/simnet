@@ -93,7 +93,7 @@ func calculateCPUPercent(previousCPU, previousSystem uint64, v *types.StatsJSON)
 	if systemDelta > 0.0 && cpuDelta > 0.0 {
 		cpuPercent = (cpuDelta / systemDelta) * float64(len(v.CPUStats.CPUUsage.PercpuUsage)) * 100.0
 	}
-	return int(math.Ceil(cpuPercent * 100))
+	return int(math.Ceil(cpuPercent))
 }
 
 func checkErr(err error) {

@@ -27,31 +27,37 @@ func TestPlotter_Main(t *testing.T) {
 
 	output := filepath.Join(dir, "example.png")
 
-	os.Args = []string{os.Args[0], "-input", input.Name(), "-output", output, "-tx"}
+	os.Args = []string{os.Args[0], "-input", input.Name(), "graph", "-output", output, "tx"}
 
 	defer os.Remove(input.Name())
 	defer os.RemoveAll(dir)
 
+	main()
+
+	os.Args = []string{os.Args[0], "-input", input.Name(), "max"}
+	main()
+
+	os.Args = []string{os.Args[0], "-input", input.Name(), "average"}
 	main()
 }
 
 func TestPlotter_MainMissingInput(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
-			require.Equal(t, errNoInput, r)
+			require.EqualError(t, r.(error), errNoInput)
 		} else {
 			t.Fatal("expect a panic")
 		}
 	}()
 
-	os.Args = []string{os.Args[0], "-input", "invalid_name"}
+	os.Args = []string{os.Args[0], "-input", "invalid_name", "graph", "cpu"}
 	main()
 }
 
 func TestPlotter_MainBadInput(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
-			require.Equal(t, errInputMalformed, r)
+			require.EqualError(t, r.(error), errInputMalformed)
 		} else {
 			t.Fatal("expect a panic")
 		}
@@ -62,7 +68,7 @@ func TestPlotter_MainBadInput(t *testing.T) {
 	defer f.Close()
 	defer os.Remove(f.Name())
 
-	os.Args = []string{os.Args[0], "-input", f.Name()}
+	os.Args = []string{os.Args[0], "-input", f.Name(), "graph", "rx"}
 	main()
 }
 
@@ -74,7 +80,7 @@ func TestPlotter_MainBadPlot(t *testing.T) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			require.Equal(t, errMakePlot, r)
+			require.EqualError(t, r.(error), errMakePlot)
 		} else {
 			t.Fatal("expect a panic")
 		}
@@ -96,14 +102,14 @@ func TestPlotter_MainBadPlot(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	os.Args = []string{os.Args[0], "-input", f.Name()}
+	os.Args = []string{os.Args[0], "-input", f.Name(), "graph", "mem"}
 	main()
 }
 
 func TestPlotter_MainBadOutput(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
-			require.Equal(t, errMakeImage, r)
+			require.EqualError(t, r.(error), errMakeImage)
 		} else {
 			t.Fatal("expect a panic")
 		}
@@ -117,7 +123,7 @@ func TestPlotter_MainBadOutput(t *testing.T) {
 	ioutil.WriteFile(input, []byte("{}"), 0644)
 
 	// Trigger a unsupported format.
-	os.Args = []string{os.Args[0], "-input", input, "-output", "noname"}
+	os.Args = []string{os.Args[0], "-input", input, "graph", "-output", "noname", "tx"}
 	main()
 }
 

@@ -129,8 +129,7 @@ go run main.go -do-clean
 
 First you need to install the plot tool
 ```bash
-go get -u go.dedis.ch/simnet # get latest version
-go install go.dedis.ch/simnet/metrics/simplot
+go get -u go.dedis.ch/simnet/metrics/simplot
 ```
 
 Then to draw a plot

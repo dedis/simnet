@@ -25,4 +25,5 @@ require (
 	k8s.io/apimachinery v0.0.0-20191123233150-4c4803ed55e3
 	k8s.io/client-go v0.0.0-20191121015835-571c0ef67034
 	k8s.io/utils v0.0.0-20191114200735-6ca3b61696b6 // indirect
+	github.com/urfave/cli/v2 v2.2.0
 )

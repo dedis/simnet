@@ -58,6 +58,57 @@ func NewNodeStats(reader io.Reader, start, end time.Time) NodeStats {
 	return ns
 }
 
+// Max returns the maximum value for each column.
+func (ns NodeStats) Max() (uint64, uint64, uint64, uint64) {
+	cpu := uint64(0)
+	mem := uint64(0)
+	tx := uint64(0)
+	rx := uint64(0)
+
+	for i := range ns.Timestamps {
+		if cpu < ns.CPU[i] {
+			cpu = ns.CPU[i]
+		}
+
+		if mem < ns.Memory[i] {
+			mem = ns.Memory[i]
+		}
+
+		if tx < ns.TxBytes[i] {
+			tx = ns.TxBytes[i]
+		}
+
+		if rx < ns.RxBytes[i] {
+			rx = ns.RxBytes[i]
+		}
+	}
+
+	return cpu, mem, tx, rx
+}
+
+// Average returns the average for each column.
+func (ns NodeStats) Average() (float64, float64, float64, float64) {
+	cpu := uint64(0)
+	mem := uint64(0)
+	tx := uint64(0)
+	rx := uint64(0)
+
+	for i := range ns.Timestamps {
+		cpu += ns.CPU[i]
+		mem += ns.Memory[i]
+		tx += ns.TxBytes[i]
+		rx += ns.RxBytes[i]
+	}
+
+	length := float64(len(ns.Timestamps))
+	acpu := float64(cpu) / length
+	amem := float64(mem) / length
+	atx := float64(tx) / length
+	arx := float64(rx) / length
+
+	return acpu, amem, atx, arx
+}
+
 func parseInteger(value string) (uint64, error) {
 	return strconv.ParseUint(strings.Trim(value, " "), 10, 64)
 }
