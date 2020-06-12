@@ -64,6 +64,14 @@ Dockerhub is configured to automatically create the following tags:
 
 # Getting started
 
+## Setup
+
+To run simulations with Kubernetees, **OpenVPN** needs to be installed.
+
+By default, simnet looks for OpenVPN in `/usr/local/opt/openvpn/sbin/openvpn` (that should be the case for example if you used Homebrew on MacOS to install OpenVPN), but you can specify a different path with the `-vpn` CLI option.
+
+For **MacOS** users, OpenVPN is also required to run Docker simulation (this is due to MacOS runing docker via a VM).
+
 ## Writing the simulation
 
 A basic template with the Docker strategy is shown below:
