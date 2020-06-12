@@ -142,11 +142,13 @@ go get -u go.dedis.ch/simnet/metrics/simplot
 
 Then to draw a plot
 ```bash
-simplot -tx -output plot-tx.png
-simplot -rx -output plot-rx.png
-simplot -cpu -output plot-cpu.png
-simplot -mem -output plot-mem.png
+simplot graph -output plot-tx.png tx
+simplot graph -output plot-rx.png rx
+simplot graph -output plot-cpu.png cpu
+simplot graph -output plot-mem.png mem
 ```
+
+You can always use the `-h` option (for example `simplot -h`, or `simplot graph -h`) to see the full list of options and commands available, such as computing the max or average.
 
 ## Context
 
