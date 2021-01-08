@@ -34,8 +34,11 @@ application uses a POD that will contain the application Docker container
 alongside with a monitor container that will gather data for the statistics.
 
 One POD will also be used to deploy a router that will simply run OpenVPN so
-that the simulation can open a tunnel to the cluster network and thus make
-requests to the nodes.
+that the simulation can open a tunnel to the cluster network, on the `simnet-router`
+pod and thus make requests to the simnet nodes. Simnet uses a NodePort to
+communicate with the Kubernetes node running the `simnet-router` Pod. If you
+are using a public cloud provider, please ensure the NodeIP is publically
+accessible and UDP traffic is allowed on the cluster.
 
 ### Docker
 
