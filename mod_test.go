@@ -100,7 +100,7 @@ func TestSimulation_Run(t *testing.T) {
 	stry.errClean = errors.New("clean")
 	err = sim.Run(args)
 	require.NoError(t, err)
-	require.Contains(t, buffer.String(), "An error occured during cleaning")
+	require.Contains(t, buffer.String(), "An error occurred during cleaning")
 
 	args = []string{os.Args[0], "--do-stats"}
 	stry.errStats = errors.New("oops")

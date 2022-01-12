@@ -66,9 +66,11 @@ func (s *Simulation) Run(args []string) error {
 			// Anything bad happening during the cleaning phase will be printed
 			// so an error of the simulation is returned if any.
 
+			fmt.Println("Starting cleaning...")
+
 			err := s.strategy.Clean(ctx)
 			if err != nil {
-				fmt.Fprintf(s.out, "An error occured during cleaning: %v\n", err)
+				fmt.Fprintln(s.out, "An error occurred during cleaning: ", err)
 				fmt.Fprintln(s.out, "Please make sure to clean remaining components.")
 			}
 		}()
