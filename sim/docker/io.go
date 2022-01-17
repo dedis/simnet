@@ -76,7 +76,7 @@ func (dio *dockerio) Write(container, path string, content io.Reader) error {
 	buffer := new(bytes.Buffer)
 	_, err := io.Copy(buffer, content)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed copying data into buffer: %w", err)
 	}
 
 	go func() {
@@ -90,7 +90,7 @@ func (dio *dockerio) Write(container, path string, content io.Reader) error {
 
 	err = dio.cli.CopyToContainer(ctx, container, path, reader, types.CopyToContainerOptions{})
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed copying buffer into container: %w", err)
 	}
 
 	return nil

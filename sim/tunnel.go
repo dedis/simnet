@@ -121,14 +121,14 @@ func (v *DefaultTunnel) Start(opts ...TunOption) error {
 
 	file, err := os.Create(filepath.Join(v.outDir, LogFileName))
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed creating VPN log: %w", err)
 	}
 
 	defer file.Close()
 
 	usr, err := currentUser()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed getting current user: %w", err)
 	}
 
 	args := []string{
@@ -209,7 +209,7 @@ func (v *DefaultTunnel) Stop() error {
 		if err == nil {
 			proc, err := findProcess(pid)
 			if err != nil {
-				return err
+				return xerrors.Errorf("failed to find process: %w", err)
 			}
 
 			err = proc.Kill()
@@ -217,7 +217,7 @@ func (v *DefaultTunnel) Stop() error {
 				if err.Error() == "os: process already finished" {
 					return nil
 				}
-				return err
+				return xerrors.Errorf("failed to kill: %w", err)
 			}
 		}
 	}

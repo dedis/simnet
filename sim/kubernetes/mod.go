@@ -115,46 +115,46 @@ func (s *Strategy) Option(opt sim.Option) {
 func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 	w, err := s.engine.CreateDeployment()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed creating deployment: %w", err)
 	}
 
 	err = s.engine.WaitDeployment(w)
 	w.Stop()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed waiting deployment: %w", err)
 	}
 
 	pods, err := s.engine.FetchPods()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed fetching pods: %w", err)
 	}
 
 	err = s.engine.StreamLogs(ctx)
 	if err != nil {
-		return xerrors.Errorf("couldn't stream logs: %v", err)
+		return xerrors.Errorf("failed streaming logs: %v", err)
 	}
 
 	err = s.engine.UploadConfig()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed uploading config: %w", err)
 	}
 
 	s.pods = pods
 
 	w, err = s.engine.DeployRouter(pods)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed deploying router: %w", err)
 	}
 
 	port, host, err := s.engine.WaitRouter(w)
 	w.Stop()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed waiting router: %w", err)
 	}
 
 	certificates, err := s.engine.FetchCertificates()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed fetching certs: %w", err)
 	}
 
 	err = s.tun.Start(
@@ -164,14 +164,14 @@ func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 		sim.WithCommand(s.options.VPNExecutable),
 	)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed starting tunnel: %w", err)
 	}
 
 	// Before is run at the end of the deployment so that the Execute
 	// step can be run multiple times.
 	err = round.Before(s.engine, s.makeContext())
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed running 'Before': %w", err)
 	}
 
 	s.updated = true

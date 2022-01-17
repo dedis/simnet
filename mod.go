@@ -79,24 +79,19 @@ func (s *Simulation) Run(args []string) error {
 	if doDeploy || doAll {
 		err := s.strategy.Deploy(ctx, s.round)
 		if err != nil {
-			return err
+			return xerrors.Errorf("couldn't deploy experiment: %w", err)
 		}
 	}
 
 	if doExecute || doAll {
 		err := s.strategy.Execute(ctx, s.round)
 		if err != nil {
-			return err
-		}
-
-		err = s.strategy.WriteStats(ctx, "result.json")
-		if err != nil {
-			return err
+			return xerrors.Errorf("couldn't execute experiment: %w", err)
 		}
 	}
 
-	if doStats {
-		fmt.Fprintln(s.out, "Write statistics only")
+	if doStats || doExecute || doAll {
+		fmt.Fprintln(s.out, "Writing statistics")
 
 		// The user can request to only write the statistics to the file.
 		err := s.strategy.WriteStats(ctx, "result.json")

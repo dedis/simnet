@@ -112,7 +112,8 @@ func (k kio) Exec(pod, container string, cmd []string, options sim.ExecOptions) 
 
 	exec, err := newExecutor(k.config, "POST", req.URL())
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed executing cmd '%v' on pod: %w",
+			cmd[0], err)
 	}
 
 	done := make(chan error)

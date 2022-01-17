@@ -130,7 +130,7 @@ func (s *Strategy) refreshContainers(ctx context.Context) error {
 		Filters: args,
 	})
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed refreshing containers: %w", err)
 	}
 
 	s.containers = containers
@@ -168,14 +168,14 @@ func pullImage(ctx context.Context, cli client.APIClient, image string, out io.W
 
 	reader, err := cli.ImagePull(ctx, ref, types.ImagePullOptions{})
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed pulling image '%v': %w", ref, err)
 	}
 
 	defer reader.Close()
 
 	err = waitImagePull(reader, image, out)
 	if err != nil {
-		return fmt.Errorf("couldn't complete pull: %w", err)
+		return xerrors.Errorf("couldn't complete pull: %w", err)
 	}
 
 	return nil
@@ -215,18 +215,18 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 
 		resp, err := s.cli.ContainerCreate(ctx, cfg, hcfg, nil, node.String())
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed creating container: %w", err)
 		}
 
 		err = s.cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{})
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed starting container: %w", err)
 		}
 	}
 
 	err := s.refreshContainers(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't refresh the list of containers: %w", err)
+		return xerrors.Errorf("couldn't refresh the list of containers: %w", err)
 	}
 
 	return nil
@@ -280,7 +280,7 @@ func (s *Strategy) configureContainer(
 		Stderr: true,
 	})
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed attaching container: %w", err)
 	}
 
 	defer conn.Close()
@@ -349,7 +349,7 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 		err = s.configureContainer(ctx, c, cfg, mapping, msgCh, errCh)
 		if err != nil {
 			fmt.Fprintln(s.out, goterm.ResetLine("Configure containers... Failed."))
-			return err
+			return xerrors.Errorf("failed configuring container: %w", err)
 		}
 	}
 
@@ -375,7 +375,7 @@ func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 
 	err = s.streamLogs(ctx)
 	if err != nil {
-		return xerrors.Errorf("couldn't stream logs: %v", err)
+		return xerrors.Errorf("couldn't stream logs: %w", err)
 	}
 
 	err = s.configureContainers(ctx)
@@ -385,12 +385,12 @@ func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 
 	err = s.vpn.Deploy()
 	if err != nil {
-		return xerrors.Errorf("couldn't deploy the vpn: %v", err)
+		return xerrors.Errorf("couldn't deploy the vpn: %w", err)
 	}
 
 	err = round.Before(s.dio, s.makeExecutionContext())
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed running 'Before': %w", err)
 	}
 
 	fmt.Fprintln(s.out, "Deployment... Done.")
@@ -422,12 +422,12 @@ func (s *Strategy) streamLogs(ctx context.Context) error {
 	// Clean the folder so it does not mix different simulations.
 	err := os.RemoveAll(logFolder)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed removing logs: %w", err)
 	}
 
 	err = os.MkdirAll(logFolder, 0755)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed creating log directory: %w", err)
 	}
 
 	for _, container := range s.containers {
@@ -439,12 +439,12 @@ func (s *Strategy) streamLogs(ctx context.Context) error {
 		})
 
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed accessing container logs: %w", err)
 		}
 
 		f, err := os.Create(filepath.Join(logFolder, container.Names[0]))
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed creating log folder: %w", err)
 		}
 
 		go func() {
@@ -461,12 +461,12 @@ func (s *Strategy) streamLogs(ctx context.Context) error {
 func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
 	err := s.refreshContainers(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't update the states: %w", err)
+		return xerrors.Errorf("couldn't update the states: %w", err)
 	}
 
 	closer, err := s.dio.monitorContainers(ctx, s.containers)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed monitoring containers: %w", err)
 	}
 
 	defer closer()
@@ -475,7 +475,7 @@ func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
 	// for each of them in the output folder.
 	err = s.streamLogs(ctx)
 	if err != nil {
-		return xerrors.Errorf("couldn't stream logs: %v", err)
+		return xerrors.Errorf("failed streaming logs: %w", err)
 	}
 
 	nodes := s.makeExecutionContext()
@@ -502,7 +502,7 @@ func (s *Strategy) WriteStats(ctx context.Context, filename string) error {
 	out := filepath.Join(s.options.OutputDir, filename)
 	err := s.dio.FetchStats(time.Unix(0, 0), time.Now(), out)
 	if err != nil {
-		return xerrors.Errorf("couldn't fetch stats: %v", err)
+		return xerrors.Errorf("failed fetching stats: %w", err)
 	}
 
 	fmt.Fprintln(s.out, "Write statistics... Done.")
@@ -516,7 +516,7 @@ func (s *Strategy) Clean(ctx context.Context) error {
 
 	err := s.vpn.Clean()
 	if err != nil {
-		errs = append(errs, fmt.Errorf("vpn: %v", err))
+		errs = append(errs, xerrors.Errorf("vpn: %w", err))
 	}
 
 	err = s.refreshContainers(ctx)
