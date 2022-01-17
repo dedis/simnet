@@ -121,14 +121,14 @@ func (v *DefaultTunnel) Start(opts ...TunOption) error {
 
 	file, err := os.Create(filepath.Join(v.outDir, LogFileName))
 	if err != nil {
-		return xerrors.Errorf("failed creating VPN log: %w", err)
+		return xerrors.Errorf("failed creating VPN log: %v", err)
 	}
 
 	defer file.Close()
 
 	usr, err := currentUser()
 	if err != nil {
-		return xerrors.Errorf("failed getting current user: %w", err)
+		return xerrors.Errorf("failed getting current user: %v", err)
 	}
 
 	args := []string{
@@ -172,7 +172,7 @@ func (v *DefaultTunnel) Start(opts ...TunOption) error {
 	err = cmd.Run()
 	if err != nil {
 		fmt.Printf("Command 'sudo %s' returns error: %s\n", options.Cmd, err)
-		return fmt.Errorf("vpn initialization failed: see %s", filepath.Join(v.outDir, LogFileName))
+		return xerrors.Errorf("vpn initialization failed: see %s", filepath.Join(v.outDir, LogFileName))
 	}
 
 	timeout := time.After(v.timeout)
@@ -209,7 +209,7 @@ func (v *DefaultTunnel) Stop() error {
 		if err == nil {
 			proc, err := findProcess(pid)
 			if err != nil {
-				return xerrors.Errorf("failed to find process: %w", err)
+				return xerrors.Errorf("failed to find process: %v", err)
 			}
 
 			err = proc.Kill()
@@ -217,7 +217,7 @@ func (v *DefaultTunnel) Stop() error {
 				if err.Error() == "os: process already finished" {
 					return nil
 				}
-				return xerrors.Errorf("failed to kill: %w", err)
+				return xerrors.Errorf("failed to kill: %v", err)
 			}
 		}
 	}

@@ -79,14 +79,14 @@ func (s *Simulation) Run(args []string) error {
 	if doDeploy || doAll {
 		err := s.strategy.Deploy(ctx, s.round)
 		if err != nil {
-			return xerrors.Errorf("couldn't deploy experiment: %w", err)
+			return xerrors.Errorf("couldn't deploy experiment: %v", err)
 		}
 	}
 
 	if doExecute || doAll {
 		err := s.strategy.Execute(ctx, s.round)
 		if err != nil {
-			return xerrors.Errorf("couldn't execute experiment: %w", err)
+			return xerrors.Errorf("couldn't execute experiment: %v", err)
 		}
 	}
 

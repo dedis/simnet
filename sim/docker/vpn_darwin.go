@@ -58,31 +58,31 @@ func (vpn dockerOpenVPN) Deploy() error {
 	// Get the image for the router container.
 	err := pullImage(ctx, vpn.cli, simnetRouterImage, vpn.out)
 	if err != nil {
-		return xerrors.Errorf("failed pulling router image: %w", err)
+		return xerrors.Errorf("failed pulling router image: %v", err)
 	}
 
 	// Get the image for the initialization container.
 	err = pullImage(ctx, vpn.cli, simnetRouterInitImage, vpn.out)
 	if err != nil {
-		return xerrors.Errorf("failed pulling router init image: %w", err)
+		return xerrors.Errorf("failed pulling router init image: %v", err)
 	}
 
 	// Run the init container to generate the certificates.
 	err = vpn.generateCerts(ctx)
 	if err != nil {
-		return xerrors.Errorf("failed generating certs: %w", err)
+		return xerrors.Errorf("failed generating certs: %v", err)
 	}
 
 	// Deploy the router.
 	err = vpn.createRouterContainer(ctx)
 	if err != nil {
-		return xerrors.Errorf("failed creating router container: %w", err)
+		return xerrors.Errorf("failed creating router container: %v", err)
 	}
 
 	// Open a connection to the VPN.
 	err = vpn.connect()
 	if err != nil {
-		return xerrors.Errorf("failed connecting over VPN: %w", err)
+		return xerrors.Errorf("failed connecting over VPN: %v", err)
 	}
 
 	return nil
@@ -106,22 +106,22 @@ func (vpn dockerOpenVPN) generateCerts(ctx context.Context) error {
 
 	err := os.Mkdir(vpn.outDir, 0755)
 	if err != nil && !errors.Is(err, fs.ErrExist) {
-		return xerrors.Errorf("failed creating VPN dir: %w", err)
+		return xerrors.Errorf("failed creating VPN dir: %v", err)
 	}
 
 	resp, err := vpn.cli.ContainerCreate(ctx, cfg, hcfg, nil, initContainerName)
 	if err != nil {
-		return xerrors.Errorf("failed creating router init container: %w", err)
+		return xerrors.Errorf("failed creating router init container: %v", err)
 	}
 
 	err = vpn.cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{})
 	if err != nil {
-		return xerrors.Errorf("failed starting router init container: %w", err)
+		return xerrors.Errorf("failed starting router init container: %v", err)
 	}
 
 	_, err = vpn.cli.ContainerWait(ctx, initContainerName)
 	if err != nil {
-		return xerrors.Errorf("failed waiting for router init container: %w",
+		return xerrors.Errorf("failed waiting for router init container: %v",
 			err)
 	}
 
@@ -154,12 +154,12 @@ func (vpn dockerOpenVPN) createRouterContainer(ctx context.Context) error {
 
 	resp, err := vpn.cli.ContainerCreate(ctx, cfg, hcfg, nil, routerContainerName)
 	if err != nil {
-		return xerrors.Errorf("failed creating router container: %w", err)
+		return xerrors.Errorf("failed creating router container: %v", err)
 	}
 
 	err = vpn.cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{})
 	if err != nil {
-		return xerrors.Errorf("failed starting router container: %w", err)
+		return xerrors.Errorf("failed starting router container: %v", err)
 	}
 
 	return nil
@@ -179,7 +179,7 @@ func (vpn dockerOpenVPN) connect() error {
 		sim.WithCommand(vpn.options.VPNExecutable),
 	)
 	if err != nil {
-		return xerrors.Errorf("failed starting VPN tunnel: %w", err)
+		return xerrors.Errorf("failed starting VPN tunnel: %v", err)
 	}
 
 	return nil

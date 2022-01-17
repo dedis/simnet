@@ -23,7 +23,7 @@ const (
 
 func checkErr(err error, msg string) {
 	if err != nil {
-		panic(fmt.Errorf("%s: %v", msg, err))
+		panic(xerrors.Errorf("%s: %v", msg, err))
 	}
 }
 
