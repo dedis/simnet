@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"go.dedis.ch/simnet/network"
+	"golang.org/x/xerrors"
 )
 
 // Executor is responsible for executing the commands necessary to apply the
@@ -70,7 +71,7 @@ func (e executor) execTc(args []string) error {
 
 	err := cmd.Run()
 	if err != nil {
-		return xerrors.Errorf("cmd failed: %s", err)
+		return xerrors.Errorf("cmd failed: %v", err)
 	}
 
 	return nil

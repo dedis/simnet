@@ -168,7 +168,7 @@ func pullImage(ctx context.Context, cli client.APIClient, image string, out io.W
 
 	reader, err := cli.ImagePull(ctx, ref, types.ImagePullOptions{})
 	if err != nil {
-		return xerrors.Errorf("failed pulling image '%v': %v", ref, err)
+		return xerrors.Errorf("failed pulling image '%s': %v", ref, err)
 	}
 
 	defer reader.Close()

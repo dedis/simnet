@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"go.dedis.ch/simnet/network"
+	"golang.org/x/xerrors"
 )
 
 const (
