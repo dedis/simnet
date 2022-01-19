@@ -130,7 +130,7 @@ func (s *Strategy) refreshContainers(ctx context.Context) error {
 		Filters: args,
 	})
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed refreshing containers: %v", err)
 	}
 
 	s.containers = containers
@@ -151,12 +151,12 @@ func waitImagePull(reader io.Reader, image string, out io.Writer) error {
 			}
 
 			fmt.Fprintln(out, goterm.ResetLine("Pull image... Failed."))
-			return fmt.Errorf("couldn't decode the event: %w", err)
+			return xerrors.Errorf("couldn't decode the event: %v", err)
 		}
 
 		if evt.Error != "" {
 			// Typically a stream errors or a server side error.
-			return fmt.Errorf("stream error: %s", evt.Error)
+			return xerrors.Errorf("stream error: %s", evt.Error)
 		}
 
 		fmt.Fprintf(out, goterm.ResetLine("Pull image... %s %s"), evt.Status, evt.Progress)
@@ -168,14 +168,14 @@ func pullImage(ctx context.Context, cli client.APIClient, image string, out io.W
 
 	reader, err := cli.ImagePull(ctx, ref, types.ImagePullOptions{})
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed pulling image '%s': %v", ref, err)
 	}
 
 	defer reader.Close()
 
 	err = waitImagePull(reader, image, out)
 	if err != nil {
-		return fmt.Errorf("couldn't complete pull: %w", err)
+		return xerrors.Errorf("couldn't complete pull: %v", err)
 	}
 
 	return nil
@@ -215,18 +215,18 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 
 		resp, err := s.cli.ContainerCreate(ctx, cfg, hcfg, nil, node.String())
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed creating container: %v", err)
 		}
 
 		err = s.cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{})
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed starting container: %v", err)
 		}
 	}
 
 	err := s.refreshContainers(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't refresh the list of containers: %w", err)
+		return xerrors.Errorf("couldn't refresh the list of containers: %v", err)
 	}
 
 	return nil
@@ -241,7 +241,7 @@ func waitExec(containerID string, msgCh <-chan events.Message, errCh <-chan erro
 			if msg.Status == "die" && msg.Actor.ID == containerID {
 				code := msg.Actor.Attributes["exitCode"]
 				if code != "0" {
-					return fmt.Errorf("exit code %s", code)
+					return xerrors.Errorf("exit code %s", code)
 				}
 
 				return nil
@@ -270,7 +270,7 @@ func (s *Strategy) configureContainer(
 
 	resp, err := s.cli.ContainerCreate(ctx, cfg, hcfg, nil, "")
 	if err != nil {
-		return fmt.Errorf("couldn't create netem container: %w", err)
+		return xerrors.Errorf("couldn't create netem container: %v", err)
 	}
 
 	conn, err := s.cli.ContainerAttach(ctx, resp.ID, types.ContainerAttachOptions{
@@ -280,14 +280,14 @@ func (s *Strategy) configureContainer(
 		Stderr: true,
 	})
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed attaching container: %v", err)
 	}
 
 	defer conn.Close()
 
 	err = s.cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{})
 	if err != nil {
-		return fmt.Errorf("couldn't start netem container: %w", err)
+		return xerrors.Errorf("couldn't start netem container: %v", err)
 	}
 
 	rules := s.options.Topology.Rules(network.NodeID(containerName(c)), mapping)
@@ -295,7 +295,7 @@ func (s *Strategy) configureContainer(
 	enc := json.NewEncoder(conn.Conn)
 	err = enc.Encode(&rules)
 	if err != nil {
-		return fmt.Errorf("couldn't encode the rules: %w", err)
+		return xerrors.Errorf("couldn't encode the rules: %v", err)
 	}
 
 	// Output from the monitor container executing the netem tool.
@@ -303,7 +303,7 @@ func (s *Strategy) configureContainer(
 
 	err = waitExec(resp.ID, msgCh, errCh, ExecWaitTimeout)
 	if err != nil {
-		return fmt.Errorf("couldn't apply rule: %w", err)
+		return xerrors.Errorf("couldn't apply rule: %v", err)
 	}
 
 	return nil
@@ -313,14 +313,14 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 	ref := fmt.Sprintf("%s/%s:%s", ImageBaseURL, ImageMonitor, daemon.Version)
 	reader, err := s.cli.ImagePull(ctx, ref, types.ImagePullOptions{})
 	if err != nil {
-		return fmt.Errorf("couldn't pull netem image: %w", err)
+		return xerrors.Errorf("couldn't pull netem image: %v", err)
 	}
 
 	defer reader.Close()
 
 	err = waitImagePull(reader, ref, s.out)
 	if err != nil {
-		return fmt.Errorf("couldn't complete pull: %w", err)
+		return xerrors.Errorf("couldn't complete pull: %v", err)
 	}
 
 	cfg := &container.Config{
@@ -349,7 +349,7 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 		err = s.configureContainer(ctx, c, cfg, mapping, msgCh, errCh)
 		if err != nil {
 			fmt.Fprintln(s.out, goterm.ResetLine("Configure containers... Failed."))
-			return err
+			return xerrors.Errorf("failed configuring container: %v", err)
 		}
 	}
 
@@ -362,14 +362,14 @@ func (s *Strategy) configureContainers(ctx context.Context) error {
 func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 	err := pullImage(ctx, s.cli, s.options.Image, s.out)
 	if err != nil {
-		return xerrors.Errorf("couldn't pull the image: %w", err)
+		return xerrors.Errorf("couldn't pull the image: %v", err)
 	}
 
 	fmt.Fprintf(s.out, "Creating containers... In Progress.")
 	err = s.createContainers(ctx)
 	if err != nil {
 		fmt.Fprintln(s.out, goterm.ResetLine("Creating containers... Failed."))
-		return xerrors.Errorf("couldn't create the container: %w", err)
+		return xerrors.Errorf("couldn't create the container: %v", err)
 	}
 	fmt.Fprintln(s.out, goterm.ResetLine("Creating containers... Done."))
 
@@ -380,7 +380,7 @@ func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 
 	err = s.configureContainers(ctx)
 	if err != nil {
-		return xerrors.Errorf("couldn't configure the containers: %w", err)
+		return xerrors.Errorf("couldn't configure the containers: %v", err)
 	}
 
 	err = s.vpn.Deploy()
@@ -390,7 +390,7 @@ func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 
 	err = round.Before(s.dio, s.makeExecutionContext())
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed running 'Before': %v", err)
 	}
 
 	fmt.Fprintln(s.out, "Deployment... Done.")
@@ -422,12 +422,12 @@ func (s *Strategy) streamLogs(ctx context.Context) error {
 	// Clean the folder so it does not mix different simulations.
 	err := os.RemoveAll(logFolder)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed removing logs: %v", err)
 	}
 
 	err = os.MkdirAll(logFolder, 0755)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed creating log directory: %v", err)
 	}
 
 	for _, container := range s.containers {
@@ -439,12 +439,12 @@ func (s *Strategy) streamLogs(ctx context.Context) error {
 		})
 
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed accessing container logs: %v", err)
 		}
 
 		f, err := os.Create(filepath.Join(logFolder, container.Names[0]))
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed creating log folder: %v", err)
 		}
 
 		go func() {
@@ -461,12 +461,12 @@ func (s *Strategy) streamLogs(ctx context.Context) error {
 func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
 	err := s.refreshContainers(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't update the states: %w", err)
+		return xerrors.Errorf("couldn't update the states: %v", err)
 	}
 
 	closer, err := s.dio.monitorContainers(ctx, s.containers)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed monitoring containers: %v", err)
 	}
 
 	defer closer()
@@ -475,20 +475,20 @@ func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
 	// for each of them in the output folder.
 	err = s.streamLogs(ctx)
 	if err != nil {
-		return xerrors.Errorf("couldn't stream logs: %v", err)
+		return xerrors.Errorf("failed streaming logs: %v", err)
 	}
 
 	nodes := s.makeExecutionContext()
 
 	err = round.Execute(s.dio, nodes)
 	if err != nil {
-		return fmt.Errorf("couldn't execute: %w", err)
+		return xerrors.Errorf("couldn't execute: %v", err)
 	}
 
 	// After step so that it is executed after each experiment.
 	err = round.After(s.dio, nodes)
 	if err != nil {
-		return fmt.Errorf("couldn't perform after step: %w", err)
+		return xerrors.Errorf("couldn't perform after step: %v", err)
 	}
 
 	fmt.Fprintln(s.out, "Execution... Done.")
@@ -502,7 +502,7 @@ func (s *Strategy) WriteStats(ctx context.Context, filename string) error {
 	out := filepath.Join(s.options.OutputDir, filename)
 	err := s.dio.FetchStats(time.Unix(0, 0), time.Now(), out)
 	if err != nil {
-		return xerrors.Errorf("couldn't fetch stats: %v", err)
+		return xerrors.Errorf("failed fetching stats: %v", err)
 	}
 
 	fmt.Fprintln(s.out, "Write statistics... Done.")
@@ -516,12 +516,12 @@ func (s *Strategy) Clean(ctx context.Context) error {
 
 	err := s.vpn.Clean()
 	if err != nil {
-		errs = append(errs, fmt.Errorf("vpn: %v", err))
+		errs = append(errs, xerrors.Errorf("vpn: %v", err))
 	}
 
 	err = s.refreshContainers(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't get running containers: %w", err)
+		return xerrors.Errorf("couldn't get running containers: %v", err)
 	}
 
 	timeout := ContainerStopTimeout
@@ -534,7 +534,7 @@ func (s *Strategy) Clean(ctx context.Context) error {
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("couldn't remove the containers: %v", errs)
+		return xerrors.Errorf("couldn't remove the containers: %v", errs)
 	}
 
 	fmt.Fprintln(s.out, "Cleaning... Done.")

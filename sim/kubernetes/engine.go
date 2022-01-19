@@ -137,12 +137,12 @@ type kubeEngine struct {
 func newKubeEngine(config *rest.Config, ns string, options *sim.Options) (*kubeEngine, error) {
 	client, err := newClient(config)
 	if err != nil {
-		return nil, fmt.Errorf("client: %v", err)
+		return nil, xerrors.Errorf("client: %v", err)
 	}
 
 	u, err := url.Parse(config.Host)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't parse the host: %v", err)
+		return nil, xerrors.Errorf("couldn't parse the host: %v", err)
 	}
 
 	if options.Data[OptionMemoryAlloc] == nil {
@@ -221,7 +221,7 @@ func (kd *kubeEngine) makeContainer() apiv1.Container {
 }
 
 func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
-	fmt.Fprint(kd.writer, "Creating deployment...")
+	fmt.Fprintln(kd.writer, "Creating deployment...")
 
 	opts := metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, AppID),
@@ -231,7 +231,7 @@ func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 	// to have started.
 	w, err := kd.client.CoreV1().Pods(kd.namespace).Watch(opts)
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("pods could not be watched: %v", err)
 	}
 
 	for _, node := range kd.options.Topology.GetNodes() {
@@ -244,7 +244,7 @@ func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 		_, err = kd.client.AppsV1().Deployments(kd.namespace).Create(deployment)
 		if err != nil {
 			fmt.Fprintln(kd.writer, goterm.ResetLine("Creating deployment... failure"))
-			return nil, err
+			return nil, xerrors.Errorf("deployment creation failed: %v", err)
 		}
 	}
 
@@ -254,7 +254,7 @@ func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 }
 
 func (kd *kubeEngine) WaitDeployment(w watch.Interface) error {
-	fmt.Fprint(kd.writer, "Waiting deployment...")
+	fmt.Fprintln(kd.writer, "Waiting deployment...")
 	readyMap := make(map[string]struct{})
 
 	for {
@@ -266,7 +266,7 @@ func (kd *kubeEngine) WaitDeployment(w watch.Interface) error {
 		isReady, err := checkPodStatus(pod)
 		if err != nil {
 			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting deployment... failure"))
-			return err
+			return xerrors.Errorf("check pod status failed: %v", err)
 		}
 
 		if isReady {
@@ -294,7 +294,7 @@ func (kd *kubeEngine) configureContainer(pods []apiv1.Pod) error {
 
 	errCh := make(chan error, len(pods))
 
-	fmt.Fprintf(kd.writer, "Configuring pods...")
+	fmt.Fprintln(kd.writer, "Configuring pods...")
 	for _, pod := range pods {
 		go func(pod apiv1.Pod) {
 			defer wg.Done()
@@ -321,17 +321,17 @@ func (kd *kubeEngine) configureContainer(pods []apiv1.Pod) error {
 }
 
 func (kd *kubeEngine) FetchPods() ([]apiv1.Pod, error) {
-	fmt.Fprintf(kd.writer, "Fetching pods...")
+	fmt.Fprintln(kd.writer, "Fetching pods...")
 
 	pods, err := kd.client.CoreV1().Pods(kd.namespace).List(metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, AppID),
 	})
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("error when listing pods: %v", err)
 	}
 
 	if len(pods.Items) != kd.options.Topology.Len() {
-		return nil, fmt.Errorf("invalid number of pods: %d vs %d", len(pods.Items), kd.options.Topology.Len())
+		return nil, xerrors.Errorf("invalid number of pods: %d vs %d", len(pods.Items), kd.options.Topology.Len())
 	}
 
 	fmt.Fprintln(kd.writer, goterm.ResetLine("Fetching pods... ok"))
@@ -407,7 +407,7 @@ func (kd *kubeEngine) UploadConfig() error {
 }
 
 func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
-	fmt.Fprintf(kd.writer, "Deploying the router...")
+	fmt.Fprintln(kd.writer, "Deploying the router...")
 
 	opts := metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", LabelID, RouterID),
@@ -415,12 +415,12 @@ func (kd *kubeEngine) DeployRouter(pods []apiv1.Pod) (watch.Interface, error) {
 
 	w, err := kd.client.CoreV1().Pods(kd.namespace).Watch(opts)
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("failed watching pods: %v", err)
 	}
 
 	_, err = kd.client.AppsV1().Deployments(kd.namespace).Create(makeRouterDeployment())
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("failed creating deployment: %v", err)
 	}
 
 	fmt.Fprintln(kd.writer, goterm.ResetLine("Deploying the router... ok"))
@@ -432,12 +432,12 @@ func (kd *kubeEngine) createVPNService() (*apiv1.ServicePort, error) {
 
 	w, err := intf.Watch(metav1.ListOptions{})
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("failed watching svc interface: %v", err)
 	}
 
 	_, err = intf.Create(kd.makeRouterService())
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("failed creating router service: %v", err)
 	}
 
 	for {
@@ -453,7 +453,7 @@ func (kd *kubeEngine) createVPNService() (*apiv1.ServicePort, error) {
 }
 
 func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string, error) {
-	fmt.Fprintf(kd.writer, "Waiting for the router...")
+	fmt.Fprintln(kd.writer, "Waiting for the router...")
 
 	host := kd.host
 
@@ -483,7 +483,8 @@ func (kd *kubeEngine) WaitRouter(w watch.Interface) (*apiv1.ServicePort, string,
 			fmt.Fprintln(kd.writer, goterm.ResetLine("Waiting for the router... ok"))
 			port, err := kd.createVPNService()
 			if err != nil {
-				return nil, "", err
+				return nil, "", xerrors.Errorf(
+					"failed creating vpn: %v", err)
 			}
 
 			return port, host, nil
@@ -504,20 +505,20 @@ func (kd *kubeEngine) writeCertificates(pod string, certs sim.Certificates) erro
 	for out, dst := range files {
 		r, err := kd.kio.Read(pod, ContainerRouterName, dst)
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed reading pod: %v", err)
 		}
 
 		// Create a file that can be read only by the user.
 		f, err := os.OpenFile(out, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed opening file: %v", err)
 		}
 
 		defer f.Close()
 
 		_, err = io.Copy(f, r)
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed copying file: %v", err)
 		}
 	}
 
@@ -525,7 +526,7 @@ func (kd *kubeEngine) writeCertificates(pod string, certs sim.Certificates) erro
 }
 
 func (kd *kubeEngine) FetchCertificates() (sim.Certificates, error) {
-	fmt.Fprintf(kd.writer, "Fetching the certificates...")
+	fmt.Fprintln(kd.writer, "Fetching the certificates...")
 
 	// This defines where the files will be written on the client side.
 	certs := sim.Certificates{
@@ -600,7 +601,7 @@ func (kd *kubeEngine) deleteService(opts *metav1.DeleteOptions) error {
 
 	err := intf.Delete("simnet-router", opts)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed deleting router: %v", err)
 	}
 
 	return nil
@@ -650,12 +651,12 @@ func (kd *kubeEngine) StreamLogs(ctx context.Context) error {
 	// Clean the folder to remove old log files.
 	err := os.RemoveAll(dir)
 	if err != nil {
-		return fmt.Errorf("couldn't clean log folder: %v", err)
+		return xerrors.Errorf("couldn't clean log folder: %v", err)
 	}
 
 	err = os.MkdirAll(dir, 0755)
 	if err != nil {
-		return fmt.Errorf("couldn't create log folder: %v", err)
+		return xerrors.Errorf("couldn't create log folder: %v", err)
 	}
 
 	kd.wgLogs = sync.WaitGroup{}
@@ -665,7 +666,7 @@ func (kd *kubeEngine) StreamLogs(ctx context.Context) error {
 
 		file, err := os.Create(filepath.Join(dir, fmt.Sprintf("%s.log", pod.Name)))
 		if err != nil {
-			return fmt.Errorf("couldn't create log file: %v", err)
+			return xerrors.Errorf("couldn't create log file: %v", err)
 		}
 
 		req := kd.client.CoreV1().Pods(kd.namespace).GetLogs(pod.Name, &apiv1.PodLogOptions{
@@ -675,7 +676,7 @@ func (kd *kubeEngine) StreamLogs(ctx context.Context) error {
 
 		reader, err := req.Stream()
 		if err != nil {
-			return fmt.Errorf("couldn't open the stream: %w", err)
+			return xerrors.Errorf("couldn't open the stream: %v", err)
 		}
 
 		// This Go routine will be done when the stream is closed.
@@ -698,7 +699,8 @@ func (kd *kubeEngine) StreamLogs(ctx context.Context) error {
 func (kd *kubeEngine) ReadStats(pod string, start, end time.Time) (metrics.NodeStats, error) {
 	reader, err := kd.kio.Read(pod, ContainerMonitorName, MonitorDataFilepath)
 	if err != nil {
-		return metrics.NodeStats{}, err
+		return metrics.NodeStats{},
+			xerrors.Errorf("failed reading stats: %v", err)
 	}
 
 	ns := metrics.NewNodeStats(reader, start, end)
@@ -749,7 +751,7 @@ func (kd *kubeEngine) Write(node, path string, content io.Reader) error {
 
 	err := kd.kio.Write(pod.Name, ContainerAppName, path, reader)
 	if err != nil {
-		return fmt.Errorf("couldn't open stream: %w", err)
+		return xerrors.Errorf("couldn't open stream: %v", err)
 	}
 
 	return nil
@@ -765,7 +767,7 @@ func (kd *kubeEngine) Exec(node string, cmd []string, options sim.ExecOptions) e
 
 	err := kd.kio.Exec(pod.Name, ContainerAppName, cmd, options)
 	if err != nil {
-		return fmt.Errorf("couldn't open stream: %w", err)
+		return xerrors.Errorf("couldn't open stream: %v", err)
 	}
 
 	return nil
@@ -829,7 +831,8 @@ func (kd *kubeEngine) FetchStats(start, end time.Time, filename string) error {
 	for _, pod := range kd.pods {
 		ns, err := kd.ReadStats(pod.Name, start, end)
 		if err != nil {
-			return err
+			return xerrors.Errorf("failed reading stats from pod '%v': %v",
+				pod.Name, err)
 		}
 
 		name := pod.Labels[LabelNode]
@@ -839,7 +842,7 @@ func (kd *kubeEngine) FetchStats(start, end time.Time, filename string) error {
 
 	f, err := os.Create(filename)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed creating stats file: %v", err)
 	}
 
 	defer f.Close()
@@ -847,7 +850,7 @@ func (kd *kubeEngine) FetchStats(start, end time.Time, filename string) error {
 	enc := json.NewEncoder(f)
 	err = enc.Encode(&stats)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed encoding stats: %v", err)
 	}
 
 	return nil

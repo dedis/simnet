@@ -95,6 +95,10 @@ func (k kio) Write(pod, container, path string, content io.Reader) error {
 }
 
 func (k kio) Exec(pod, container string, cmd []string, options sim.ExecOptions) error {
+	if len(cmd) < 1 {
+		return xerrors.New("no command to execute")
+	}
+
 	req := k.restclient.
 		Post().
 		Namespace(k.namespace).
@@ -112,7 +116,8 @@ func (k kio) Exec(pod, container string, cmd []string, options sim.ExecOptions) 
 
 	exec, err := newExecutor(k.config, "POST", req.URL())
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed executing cmd '%s' on pod: %v",
+			cmd[0], err)
 	}
 
 	done := make(chan error)

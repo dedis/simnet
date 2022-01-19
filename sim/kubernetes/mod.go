@@ -73,7 +73,7 @@ func NewStrategy(cfg string, opts ...sim.Option) (*Strategy, error) {
 	// Create the directory where the data will be stored.
 	err := os.MkdirAll(options.OutputDir, 0755)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't create the data folder: %v", err)
+		return nil, xerrors.Errorf("couldn't create the data folder: %v", err)
 	}
 
 	clientcfg := newClientConfig(
@@ -83,17 +83,17 @@ func NewStrategy(cfg string, opts ...sim.Option) (*Strategy, error) {
 
 	restcfg, err := clientcfg.ClientConfig()
 	if err != nil {
-		return nil, fmt.Errorf("config: %v", err)
+		return nil, xerrors.Errorf("config: %v", err)
 	}
 
 	namespace, _, err := clientcfg.Namespace()
 	if err != nil {
-		return nil, fmt.Errorf("couldn't read the namespace: %v", err)
+		return nil, xerrors.Errorf("couldn't read the namespace: %v", err)
 	}
 
 	engine, err := newKubeEngine(restcfg, namespace, options)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't create the engine: %v", err)
+		return nil, xerrors.Errorf("couldn't create the engine: %v", err)
 	}
 
 	return &Strategy{
@@ -115,46 +115,46 @@ func (s *Strategy) Option(opt sim.Option) {
 func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 	w, err := s.engine.CreateDeployment()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed creating deployment: %v", err)
 	}
 
 	err = s.engine.WaitDeployment(w)
 	w.Stop()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed waiting deployment: %v", err)
 	}
 
 	pods, err := s.engine.FetchPods()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed fetching pods: %v", err)
 	}
 
 	err = s.engine.StreamLogs(ctx)
 	if err != nil {
-		return xerrors.Errorf("couldn't stream logs: %v", err)
+		return xerrors.Errorf("failed streaming logs: %v", err)
 	}
 
 	err = s.engine.UploadConfig()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed uploading config: %v", err)
 	}
 
 	s.pods = pods
 
 	w, err = s.engine.DeployRouter(pods)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed deploying router: %v", err)
 	}
 
 	port, host, err := s.engine.WaitRouter(w)
 	w.Stop()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed waiting router: %v", err)
 	}
 
 	certificates, err := s.engine.FetchCertificates()
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed fetching certs: %v", err)
 	}
 
 	err = s.tun.Start(
@@ -164,14 +164,14 @@ func (s *Strategy) Deploy(ctx context.Context, round sim.Round) error {
 		sim.WithCommand(s.options.VPNExecutable),
 	)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed starting tunnel: %v", err)
 	}
 
 	// Before is run at the end of the deployment so that the Execute
 	// step can be run multiple times.
 	err = round.Before(s.engine, s.makeContext())
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed running 'Before': %v", err)
 	}
 
 	s.updated = true
@@ -210,14 +210,14 @@ func (s *Strategy) Execute(ctx context.Context, round sim.Round) error {
 
 	err = round.Execute(s.engine, nodes)
 	if err != nil {
-		return xerrors.Errorf("couldn't perform execute step: %w", err)
+		return xerrors.Errorf("couldn't perform execute step: %v", err)
 	}
 
 	s.doneTime = time.Now()
 
 	err = round.After(s.engine, nodes)
 	if err != nil {
-		return xerrors.Errorf("couldn't perform after step: %w", err)
+		return xerrors.Errorf("couldn't perform after step: %v", err)
 	}
 
 	return nil
@@ -268,7 +268,7 @@ func (s *Strategy) Clean(ctx context.Context) error {
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("cleaning error: %v", errs)
+		return xerrors.Errorf("cleaning error: %v", errs)
 	}
 
 	return nil

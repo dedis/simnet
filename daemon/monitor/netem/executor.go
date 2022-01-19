@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"go.dedis.ch/simnet/network"
+	"golang.org/x/xerrors"
 )
 
 // Executor is responsible for executing the commands necessary to apply the
@@ -54,7 +55,7 @@ func (e executor) Execute(rules []network.Rule) error {
 	for _, args := range commands {
 		err := e.execTc(args)
 		if err != nil {
-			return fmt.Errorf("%s command failed: %v", e.cmd, err)
+			return xerrors.Errorf("%s command failed: %v", e.cmd, err)
 		}
 	}
 
@@ -70,7 +71,7 @@ func (e executor) execTc(args []string) error {
 
 	err := cmd.Run()
 	if err != nil {
-		return fmt.Errorf("cmd failed: %s", err)
+		return xerrors.Errorf("cmd failed: %v", err)
 	}
 
 	return nil

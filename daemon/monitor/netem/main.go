@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"go.dedis.ch/simnet/network"
+	"golang.org/x/xerrors"
 )
 
 const (
@@ -23,7 +24,7 @@ const (
 
 func checkErr(err error, msg string) {
 	if err != nil {
-		panic(fmt.Errorf("%s: %v", msg, err))
+		panic(xerrors.Errorf("%s: %v", msg, err))
 	}
 }
 

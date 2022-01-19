@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"math"
@@ -52,12 +51,12 @@ func (dio *dockerio) Read(container, path string) (io.ReadCloser, error) {
 
 	reader, _, err := dio.cli.CopyFromContainer(ctx, container, path)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't open stream: %w", err)
+		return nil, xerrors.Errorf("couldn't open stream: %v", err)
 	}
 
 	tr := tar.NewReader(reader)
 	if _, err = tr.Next(); err != nil {
-		return nil, fmt.Errorf("couldn't untar: %w", err)
+		return nil, xerrors.Errorf("couldn't untar: %v", err)
 	}
 
 	return ioutil.NopCloser(tr), nil
@@ -76,7 +75,7 @@ func (dio *dockerio) Write(container, path string, content io.Reader) error {
 	buffer := new(bytes.Buffer)
 	_, err := io.Copy(buffer, content)
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed copying data into buffer: %v", err)
 	}
 
 	go func() {
@@ -90,7 +89,7 @@ func (dio *dockerio) Write(container, path string, content io.Reader) error {
 
 	err = dio.cli.CopyToContainer(ctx, container, path, reader, types.CopyToContainerOptions{})
 	if err != nil {
-		return err
+		return xerrors.Errorf("failed copying buffer into container: %v", err)
 	}
 
 	return nil
@@ -108,14 +107,14 @@ func (dio *dockerio) Exec(container string, cmd []string, options sim.ExecOption
 		Cmd:          cmd,
 	})
 	if err != nil {
-		return fmt.Errorf("couldn't create exec: %w", err)
+		return xerrors.Errorf("couldn't create exec: %v", err)
 	}
 
 	msgCh, errCh := dio.cli.Events(ctx, types.EventsOptions{})
 
 	conn, err := dio.cli.ContainerExecAttach(ctx, resp.ID, types.ExecConfig{})
 	if err != nil {
-		return fmt.Errorf("couldn't attach exec: %w", err)
+		return xerrors.Errorf("couldn't attach exec: %v", err)
 	}
 
 	defer conn.Close()
@@ -153,13 +152,13 @@ func (dio *dockerio) Exec(container string, cmd []string, options sim.ExecOption
 
 	err = dio.cli.ContainerExecStart(ctx, resp.ID, types.ExecStartCheck{})
 	if err != nil {
-		return fmt.Errorf("couldn't start exec: %w", err)
+		return xerrors.Errorf("couldn't start exec: %v", err)
 	}
 
 	// Check if something bad happened when writing to stdin.
 	err, ok := <-done
 	if err != nil && ok {
-		return fmt.Errorf("couldn't write to stdin: %v", err)
+		return xerrors.Errorf("couldn't write to stdin: %v", err)
 	}
 
 	// Everything's good so far so let's wait for the command to be completly done
@@ -170,13 +169,13 @@ func (dio *dockerio) Exec(container string, cmd []string, options sim.ExecOption
 			if msg.Status == "exec_die" && msg.Actor.Attributes["execID"] == resp.ID {
 				code := msg.Actor.Attributes["exitCode"]
 				if code != "0" {
-					return fmt.Errorf("exited with %s", code)
+					return xerrors.Errorf("exited with %s", code)
 				}
 
 				return nil
 			}
 		case err := <-errCh:
-			return fmt.Errorf("received error event: %w", err)
+			return xerrors.Errorf("received error event: %w", err)
 		}
 	}
 }
@@ -210,7 +209,7 @@ func (dio *dockerio) FetchStats(from, end time.Time, filename string) error {
 	enc := json.NewEncoder(file)
 	err = enc.Encode(&dio.stats)
 	if err != nil {
-		return xerrors.Errorf("couldn't encode the stats: %w", err)
+		return xerrors.Errorf("couldn't encode the stats: %v", err)
 	}
 
 	return nil

@@ -66,9 +66,11 @@ func (s *Simulation) Run(args []string) error {
 			// Anything bad happening during the cleaning phase will be printed
 			// so an error of the simulation is returned if any.
 
+			fmt.Println("Starting cleaning...")
+
 			err := s.strategy.Clean(ctx)
 			if err != nil {
-				fmt.Fprintf(s.out, "An error occured during cleaning: %v\n", err)
+				fmt.Fprintln(s.out, "An error occurred during cleaning: ", err)
 				fmt.Fprintln(s.out, "Please make sure to clean remaining components.")
 			}
 		}()
@@ -77,24 +79,19 @@ func (s *Simulation) Run(args []string) error {
 	if doDeploy || doAll {
 		err := s.strategy.Deploy(ctx, s.round)
 		if err != nil {
-			return err
+			return xerrors.Errorf("couldn't deploy experiment: %v", err)
 		}
 	}
 
 	if doExecute || doAll {
 		err := s.strategy.Execute(ctx, s.round)
 		if err != nil {
-			return err
-		}
-
-		err = s.strategy.WriteStats(ctx, "result.json")
-		if err != nil {
-			return err
+			return xerrors.Errorf("couldn't execute experiment: %v", err)
 		}
 	}
 
-	if doStats {
-		fmt.Fprintln(s.out, "Write statistics only")
+	if doStats || doExecute || doAll {
+		fmt.Fprintln(s.out, "Writing statistics")
 
 		// The user can request to only write the statistics to the file.
 		err := s.strategy.WriteStats(ctx, "result.json")
