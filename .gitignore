@@ -2,3 +2,6 @@ monitor/data
 plotter/plotter
 *.png
 *.json
+.DS_Store
+
+!unicore_logo.png
