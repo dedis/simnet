@@ -268,3 +268,10 @@ the module enabled.
 ./out/minikube ssh
 $ modprobe sch_netem # should not display an error
 ```
+
+---
+
+<img width="200px" src="unicore_logo.png"/>
+
+This project has received funding from the European Union's Horizon 2020 
+research and innovation programme under grant agreement No 825377.
