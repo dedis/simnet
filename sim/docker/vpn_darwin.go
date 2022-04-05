@@ -5,9 +5,7 @@ package docker
 
 import (
 	"context"
-	"errors"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -105,7 +103,7 @@ func (vpn dockerOpenVPN) generateCerts(ctx context.Context) error {
 	}
 
 	err := os.Mkdir(vpn.outDir, 0755)
-	if err != nil && !errors.Is(err, fs.ErrExist) {
+	if err != nil && os.IsNotExist(err) {
 		return xerrors.Errorf("failed creating VPN dir: %v", err)
 	}
 

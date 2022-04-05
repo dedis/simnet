@@ -1,9 +1,7 @@
 package sim
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,7 +70,7 @@ func NewOptions(opts []Option) *Options {
 	}
 
 	err := os.Mkdir(o.OutputDir, 0755)
-	if err != nil && !errors.Is(err, fs.ErrExist) {
+	if err != nil && os.IsNotExist(err) {
 		fmt.Println("failed creating simnet config dir: ", o.OutputDir, err)
 		panic(err)
 	}

@@ -27,6 +27,8 @@ var monitorFactory = func(name string) monitor {
 }
 
 func main() {
+	return
+
 	flagset := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	name := flagset.String("container", "", "container name prefix")
 	output := flagset.String("output", MeasureFileName, "output file")
