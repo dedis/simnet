@@ -27,6 +27,10 @@ var monitorFactory = func(name string) monitor {
 }
 
 func main() {
+	for {
+		fmt.Println("Still alive...")
+		time.Sleep(time.Minute)
+	}
 	return
 
 	flagset := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
