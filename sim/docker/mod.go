@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/mount"
+	dnet "github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"go.dedis.ch/simnet/daemon"
@@ -47,7 +48,7 @@ const (
 	// DefaultContainerNetwork is the default network used by Docker when no
 	// additionnal network is required when creating the container.
 	// This should be different whatsoever the Docker environment settings.
-	DefaultContainerNetwork = "bridge"
+	DefaultContainerNetwork = "simnet"
 )
 
 var (
@@ -188,8 +189,27 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 		ports[nat.Port(key)] = struct{}{}
 	}
 
+	netResp, err := s.cli.NetworkCreate(ctx, DefaultContainerNetwork, types.NetworkCreate{
+		Driver: "bridge",
+
+		IPAM: &dnet.IPAM{
+			Driver: "default",
+			Config: []dnet.IPAMConfig{
+				{
+					Subnet:  "192.168.47.0/24",
+					IPRange: "192.168.47.0/24",
+					Gateway: "192.168.47.1",
+				},
+			},
+		},
+	})
+	if err != nil {
+		return xerrors.Errorf("failed to create network: %v", err)
+	}
+
 	hcfg := &container.HostConfig{
-		AutoRemove: true,
+		AutoRemove:  true,
+		NetworkMode: "bridge",
 	}
 
 	for _, volume := range s.options.TmpFS {
@@ -202,7 +222,15 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 		})
 	}
 
-	for _, node := range s.options.Topology.GetNodes() {
+	for i, node := range s.options.Topology.GetNodes() {
+		ip := fmt.Sprintf("192.168.47.%d", i+10)
+
+		// update the options on a per-node basis, if something needs to be
+		// configured individually based on the name and IP.
+		if s.options.Update != nil {
+			s.options.Update(s.options, string(node.Name), ip)
+		}
+
 		cfg := &container.Config{
 			Image: s.options.Image,
 			Cmd:   append(append([]string{}, s.options.Cmd...), s.options.Args...),
@@ -218,13 +246,22 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 			return xerrors.Errorf("failed creating container: %v", err)
 		}
 
+		err = s.cli.NetworkConnect(ctx, netResp.ID, resp.ID, &dnet.EndpointSettings{
+			IPAMConfig: &dnet.EndpointIPAMConfig{
+				IPv4Address: ip,
+			},
+		})
+		if err != nil {
+			return xerrors.Errorf("failed to connect to simnet net: %v", err)
+		}
+
 		err = s.cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{})
 		if err != nil {
 			return xerrors.Errorf("failed starting container: %v", err)
 		}
 	}
 
-	err := s.refreshContainers(ctx)
+	err = s.refreshContainers(ctx)
 	if err != nil {
 		return xerrors.Errorf("couldn't refresh the list of containers: %v", err)
 	}
@@ -535,6 +572,11 @@ func (s *Strategy) Clean(ctx context.Context) error {
 
 	if len(errs) > 0 {
 		return xerrors.Errorf("couldn't remove the containers: %v", errs)
+	}
+
+	err = s.cli.NetworkRemove(ctx, DefaultContainerNetwork)
+	if err != nil {
+		return xerrors.Errorf("failed to remove network: %v", err)
 	}
 
 	fmt.Fprintln(s.out, "Cleaning... Done.")

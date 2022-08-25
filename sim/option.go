@@ -43,6 +43,7 @@ type Options struct {
 	TmpFS         []TmpVolume
 	VPNExecutable string
 	Data          map[string]interface{}
+	Update        func(opts *Options, nodeID, IP string)
 }
 
 // NewOptions creates empty options.
@@ -191,5 +192,13 @@ func WithTmpFS(destination string, size int64) Option {
 			Destination: destination,
 			Size:        size,
 		})
+	}
+}
+
+// WithUpdate is an option to set an update callback to update options onces the
+// nodeID and IP is known.
+func WithUpdate(update func(opts *Options, nodeID, IP string)) Option {
+	return func(opts *Options) {
+		opts.Update = update
 	}
 }
