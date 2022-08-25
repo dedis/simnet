@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -88,8 +90,8 @@ func (s dkgSimple) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	}
 
 	args = append([]string{"dkgcli", "--config", "/config", "dkg", "setup"}, authorities...)
-
 	out.Reset()
+
 	err = simio.Exec(nodes[0].Name, args, opts)
 	if err != nil {
 		return xerrors.Errorf("failed to setup: %v", err)
@@ -97,6 +99,43 @@ func (s dkgSimple) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 
 	fmt.Printf("5[%s] - Setup: %q\n", nodes[0].Name, out.String())
 
+	// 4. Encrypt
+	message := make([]byte, 20)
+
+	_, err = rand.Read(message)
+	if err != nil {
+		return xerrors.Errorf("failed to generate random message: %v", err)
+	}
+
+	args = append([]string{"dkgcli", "--config", "/config", "dkg", "encrypt", "--message"}, hex.EncodeToString(message))
+	out.Reset()
+
+	err = simio.Exec(nodes[1].Name, args, opts)
+	if err != nil {
+		return xerrors.Errorf("failed to call encrypt: %v", err)
+	}
+
+	encrypted := strings.Trim(out.String(), " \n\r")
+
+	fmt.Printf("6[%s] - Encrypt: %q\n", nodes[1].Name, encrypted)
+
+	// 5. Decrypt
+	args = append([]string{"dkgcli", "--config", "/config", "dkg", "decrypt", "--encrypted"}, encrypted)
+	out.Reset()
+
+	err = simio.Exec(nodes[2].Name, args, opts)
+	if err != nil {
+		return xerrors.Errorf("failed to call decrypt: %v", err)
+	}
+
+	decrypted := strings.Trim(out.String(), " \n\r")
+
+	fmt.Printf("7[%s] - Decrypt: %q\n", nodes[2].Name, decrypted)
+
+	// 6. Assert
+	fmt.Printf("📄 Original message (hex):\t%x\n🔓 Decrypted message (hex):\t%s", message, decrypted)
+
+	fmt.Println()
 	return nil
 }
 
@@ -110,9 +149,9 @@ func main() {
 
 	options := []sim.Option{
 		sim.WithTopology(
-			network.NewSimpleTopology(20, time.Millisecond*10),
+			network.NewSimpleTopology(5, time.Millisecond*10),
 		),
-		sim.WithImage("dedis/ddkg:0.0.3", []string{}, []string{}, sim.NewTCP(2000)),
+		sim.WithImage("dedis/ddkg:0.0.4", []string{}, []string{}, sim.NewTCP(2000)),
 		sim.WithUpdate(func(opts *sim.Options, _, IP string) {
 			opts.Args = append(startArgs, "--public", fmt.Sprintf("//%s:2000", IP))
 		}),
