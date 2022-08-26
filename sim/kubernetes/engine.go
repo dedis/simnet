@@ -235,6 +235,10 @@ func (kd *kubeEngine) CreateDeployment() (watch.Interface, error) {
 	}
 
 	for _, node := range kd.options.Topology.GetNodes() {
+		if kd.options.Update != nil {
+			kd.options.Update(kd.options, string(node.Name))
+		}
+
 		deployment := kd.makeDeployment(node, kd.makeContainer())
 
 		if cloud, ok := kd.options.Topology.(network.CloudTopology); ok {

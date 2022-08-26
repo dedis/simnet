@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"go.dedis.ch/simnet"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
-	"go.dedis.ch/simnet/sim/docker"
+	"go.dedis.ch/simnet/sim/kubernetes"
 	"golang.org/x/xerrors"
 )
 
@@ -27,9 +28,11 @@ func (s dkgSimple) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	fmt.Printf("Nodes: %v\n", nodes)
 
 	out := &bytes.Buffer{}
+	outErr := &bytes.Buffer{}
+
 	opts := sim.ExecOptions{
 		Stdout: out,
-		Stderr: out,
+		Stderr: outErr,
 	}
 
 	// 1. Exchange certificates
@@ -42,19 +45,21 @@ func (s dkgSimple) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 
 	connStr := strings.Trim(out.String(), " \n\r")
 
-	fmt.Printf("1[%s] - Token: %q\n", nodes[0].Name, out.String())
+	fmt.Printf("1[%s] - Token: %q - %q\n", nodes[0].Name, out.String(), outErr.String())
 
 	args = append([]string{"dkgcli", "--config", "/config", "minogrpc", "join",
-		"--address", "//" + nodes[0].Address + ":2000"}, strings.Split(connStr, " ")...)
+		"--address", "//" + nodes[0].Name + ":2000"}, strings.Split(connStr, " ")...)
 
 	for i := 1; i < len(nodes); i++ {
 		out.Reset()
+		outErr.Reset()
+
 		err = simio.Exec(nodes[i].Name, args, opts)
 		if err != nil {
 			return xerrors.Errorf("failed to join: %v", err)
 		}
 
-		fmt.Printf("2[%s] - Join: %q\n", nodes[i].Name, out.String())
+		fmt.Printf("2[%s] - Join: %q - %q\n", nodes[i].Name, out.String(), outErr.String())
 	}
 
 	// 2. DKG listen
@@ -62,12 +67,14 @@ func (s dkgSimple) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 
 	for _, node := range nodes {
 		out.Reset()
+		outErr.Reset()
+
 		err = simio.Exec(node.Name, args, opts)
 		if err != nil {
 			return xerrors.Errorf("failed to listen: %v", err)
 		}
 
-		fmt.Printf("3[%s] - Listen: %q\n", node.Name, out.String())
+		fmt.Printf("3[%s] - Listen: %q - %q\n", node.Name, out.String(), outErr.String())
 	}
 
 	// 3. DKG setup
@@ -86,18 +93,20 @@ func (s dkgSimple) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 		authorities[i*2] = "--authority"
 		authorities[i*2+1] = string(authority)
 
-		fmt.Printf("4[%s] - Read authority: %q\n", node.Name, string(authority))
+		fmt.Printf("4[%s] - Read authority: %q - %q\n", node.Name,
+			string(authority), outErr.String())
 	}
 
 	args = append([]string{"dkgcli", "--config", "/config", "dkg", "setup"}, authorities...)
 	out.Reset()
+	outErr.Reset()
 
 	err = simio.Exec(nodes[0].Name, args, opts)
 	if err != nil {
 		return xerrors.Errorf("failed to setup: %v", err)
 	}
 
-	fmt.Printf("5[%s] - Setup: %q\n", nodes[0].Name, out.String())
+	fmt.Printf("5[%s] - Setup: %q - %q\n", nodes[0].Name, out.String(), outErr.String())
 
 	// 4. Encrypt
 	message := make([]byte, 20)
@@ -109,6 +118,7 @@ func (s dkgSimple) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 
 	args = append([]string{"dkgcli", "--config", "/config", "dkg", "encrypt", "--message"}, hex.EncodeToString(message))
 	out.Reset()
+	outErr.Reset()
 
 	err = simio.Exec(nodes[1].Name, args, opts)
 	if err != nil {
@@ -117,11 +127,12 @@ func (s dkgSimple) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 
 	encrypted := strings.Trim(out.String(), " \n\r")
 
-	fmt.Printf("6[%s] - Encrypt: %q\n", nodes[1].Name, encrypted)
+	fmt.Printf("6[%s] - Encrypt: %q - %q\n", nodes[1].Name, encrypted, outErr.String())
 
 	// 5. Decrypt
 	args = append([]string{"dkgcli", "--config", "/config", "dkg", "decrypt", "--encrypted"}, encrypted)
 	out.Reset()
+	outErr.Reset()
 
 	err = simio.Exec(nodes[2].Name, args, opts)
 	if err != nil {
@@ -130,7 +141,7 @@ func (s dkgSimple) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 
 	decrypted := strings.Trim(out.String(), " \n\r")
 
-	fmt.Printf("7[%s] - Decrypt: %q\n", nodes[2].Name, decrypted)
+	fmt.Printf("7[%s] - Decrypt: %q - %q\n", nodes[2].Name, decrypted, outErr.String())
 
 	// 6. Assert
 	fmt.Printf("📄 Original message (hex):\t%x\n🔓 Decrypted message (hex):\t%s", message, decrypted)
@@ -149,18 +160,18 @@ func main() {
 
 	options := []sim.Option{
 		sim.WithTopology(
-			network.NewSimpleTopology(5, time.Millisecond*10),
+			network.NewSimpleTopology(3, time.Millisecond*10),
 		),
 		sim.WithImage("dedis/ddkg:0.0.4", []string{}, []string{}, sim.NewTCP(2000)),
-		sim.WithUpdate(func(opts *sim.Options, _, IP string) {
-			opts.Args = append(startArgs, "--public", fmt.Sprintf("//%s:2000", IP))
+		sim.WithUpdate(func(opts *sim.Options, nodeID string) {
+			opts.Args = append(startArgs, "--public", fmt.Sprintf("//%s:2000", nodeID))
 		}),
 	}
 
-	// kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
-	// engine, err := kubernetes.NewStrategy(kubeconfig, options...)
-	engine, err := docker.NewStrategy(options...)
+	engine, err := kubernetes.NewStrategy(kubeconfig, options...)
+	// engine, err := docker.NewStrategy(options...)
 	if err != nil {
 		panic(err)
 	}

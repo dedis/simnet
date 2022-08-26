@@ -189,19 +189,10 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 		ports[nat.Port(key)] = struct{}{}
 	}
 
+	// Set a user-defined bridge to have automatic DNS resolution between
+	// containers.
 	netResp, err := s.cli.NetworkCreate(ctx, DefaultContainerNetwork, types.NetworkCreate{
 		Driver: "bridge",
-
-		IPAM: &dnet.IPAM{
-			Driver: "default",
-			Config: []dnet.IPAMConfig{
-				{
-					Subnet:  "192.168.47.0/24",
-					IPRange: "192.168.47.0/24",
-					Gateway: "192.168.47.1",
-				},
-			},
-		},
 	})
 	if err != nil {
 		return xerrors.Errorf("failed to create network: %v", err)
@@ -222,13 +213,11 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 		})
 	}
 
-	for i, node := range s.options.Topology.GetNodes() {
-		ip := fmt.Sprintf("192.168.47.%d", i+10)
-
+	for _, node := range s.options.Topology.GetNodes() {
 		// update the options on a per-node basis, if something needs to be
-		// configured individually based on the name and IP.
+		// configured individually based on the container's name.
 		if s.options.Update != nil {
-			s.options.Update(s.options, string(node.Name), ip)
+			s.options.Update(s.options, string(node.Name))
 		}
 
 		cfg := &container.Config{
@@ -246,11 +235,7 @@ func (s *Strategy) createContainers(ctx context.Context) error {
 			return xerrors.Errorf("failed creating container: %v", err)
 		}
 
-		err = s.cli.NetworkConnect(ctx, netResp.ID, resp.ID, &dnet.EndpointSettings{
-			IPAMConfig: &dnet.EndpointIPAMConfig{
-				IPv4Address: ip,
-			},
-		})
+		err = s.cli.NetworkConnect(ctx, netResp.ID, resp.ID, &dnet.EndpointSettings{})
 		if err != nil {
 			return xerrors.Errorf("failed to connect to simnet net: %v", err)
 		}
