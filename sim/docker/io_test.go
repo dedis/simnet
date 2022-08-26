@@ -26,6 +26,7 @@ func TestIO_Tag(t *testing.T) {
 	dio := newTestDockerIO(&testIOClient{})
 
 	dio.Tag("A")
+	time.Sleep(time.Nanosecond)
 	dio.Tag("B")
 	require.Len(t, dio.stats.Tags, 2)
 }
@@ -50,8 +51,7 @@ func TestIO_ReadFailures(t *testing.T) {
 	client.errCopyFromContainer = e
 
 	_, err := dio.Read("", "")
-	require.Error(t, err)
-	require.Equal(t, errors.Unwrap(err), e)
+	require.EqualError(t, err, "couldn't open stream: copy error")
 
 	e = errors.New("tar error")
 	client.errCopyFromContainer = nil
@@ -136,24 +136,21 @@ func TestIO_ExecFailures(t *testing.T) {
 	client.errContainerExecCreate = e
 
 	err := dio.Exec("", []string{}, sim.ExecOptions{})
-	require.Error(t, err)
-	require.Equal(t, errors.Unwrap(err), e)
+	require.EqualError(t, err, "couldn't create exec: exec create error")
 
 	e = errors.New("exec attach error")
 	client.errContainerExecCreate = nil
 	client.errContainerExecAttach = e
 
 	err = dio.Exec("", []string{}, sim.ExecOptions{})
-	require.Error(t, err)
-	require.Equal(t, errors.Unwrap(err), e)
+	require.EqualError(t, err, "couldn't attach exec: exec attach error")
 
 	e = errors.New("exec start error")
 	client.errContainerExecAttach = nil
 	client.errContainerExecStart = e
 
 	err = dio.Exec("", []string{}, sim.ExecOptions{})
-	require.Error(t, err)
-	require.Equal(t, errors.Unwrap(err), e)
+	require.EqualError(t, err, "couldn't start exec: exec start error")
 
 	client.errContainerExecStart = nil
 	client.msgCh = make(chan events.Message, 1)

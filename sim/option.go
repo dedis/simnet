@@ -72,7 +72,7 @@ func NewOptions(opts []Option) *Options {
 		o.OutputDir = filepath.Join(homeDir, ".config", "simnet")
 	}
 
-	err := os.Mkdir(o.OutputDir, 0755)
+	err := os.MkdirAll(o.OutputDir, 0755)
 	if err != nil && !errors.Is(err, fs.ErrExist) {
 		fmt.Println("failed creating simnet config dir: ", o.OutputDir, err)
 		panic(err)

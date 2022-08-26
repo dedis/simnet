@@ -146,7 +146,7 @@ func TestStrategy_Deploy(t *testing.T) {
 	s.options.OutputDir = "\000"
 	s.streamingLogs = false
 	err = s.Deploy(context.Background(), &testRound{})
-	require.EqualError(t, err, "couldn't stream logs: open \x00: invalid argument")
+	require.EqualError(t, err, "couldn't stream logs: failed removing logs: open \x00: invalid argument")
 }
 
 func TestStrategy_RoundConfigureFailure(t *testing.T) {
@@ -155,8 +155,7 @@ func TestStrategy_RoundConfigureFailure(t *testing.T) {
 
 	e := errors.New("configure error")
 	err := s.Deploy(context.Background(), &testRound{errBefore: e})
-	require.Error(t, err)
-	require.Equal(t, err, e)
+	require.EqualError(t, err, "failed running 'Before': configure error")
 }
 
 func TestStrategy_DeployVPNError(t *testing.T) {
@@ -177,8 +176,7 @@ func TestStrategy_PullImageFailures(t *testing.T) {
 	client.errImagePull = e
 
 	err := s.Deploy(context.Background(), &testRound{})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.EqualError(t, err, "couldn't pull the image: failed pulling image 'docker.io/path/to/image': pull image error")
 
 	// Stream error happening during a pull.
 	client.resetErrors()
@@ -189,16 +187,14 @@ func TestStrategy_PullImageFailures(t *testing.T) {
 	require.NoError(t, enc.Encode(&Event{Error: strerr}))
 
 	err = pullImage(context.Background(), s.cli, "", ioutil.Discard)
-	require.Error(t, err)
-	require.EqualError(t, errors.Unwrap(err), fmt.Sprintf("stream error: %s", strerr))
+	require.EqualError(t, err, "couldn't complete pull: stream error: stream error")
 
 	// Data received is corrupted.
 	client.bufferPullImage.Reset()
 	client.bufferPullImage.Write([]byte("invalid event"))
 
 	err = pullImage(context.Background(), s.cli, "", ioutil.Discard)
-	require.Error(t, err)
-	require.EqualError(t, errors.Unwrap(errors.Unwrap(err)), "invalid character 'i' looking for beginning of value")
+	require.EqualError(t, err, "couldn't complete pull: couldn't decode the event: invalid character 'i' looking for beginning of value")
 }
 
 func TestStrategy_CreateContainerFailures(t *testing.T) {
@@ -210,24 +206,21 @@ func TestStrategy_CreateContainerFailures(t *testing.T) {
 	client.errContainerCreate = e
 
 	err := s.Deploy(context.Background(), &testRound{})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.EqualError(t, err, "couldn't create the container: failed creating container: create container error")
 
 	e = errors.New("start container error")
 	client.resetErrors()
 	client.errContainerStart = e
 
 	err = s.Deploy(context.Background(), &testRound{})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.EqualError(t, err, "couldn't create the container: failed starting container: start container error")
 
 	e = errors.New("container list error")
 	client.resetErrors()
 	client.errContainerList = e
 
 	err = s.Deploy(context.Background(), &testRound{})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e), err.Error())
+	require.EqualError(t, err, "couldn't create the container: couldn't refresh the list of containers: failed refreshing containers: container list error")
 }
 
 func TestStrategy_ConfigureContainersFailures(t *testing.T) {
@@ -241,8 +234,7 @@ func TestStrategy_ConfigureContainersFailures(t *testing.T) {
 	client.errImagePull = e
 
 	err := s.configureContainers(context.Background())
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.EqualError(t, err, "couldn't pull netem image: pull netem image error")
 
 	client.resetErrors()
 	client.bufferPullImage = bytes.NewBuffer([]byte("invalid event"))
@@ -256,40 +248,35 @@ func TestStrategy_ConfigureContainersFailures(t *testing.T) {
 	client.errContainerCreate = e
 
 	err = s.configureContainers(context.Background())
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.EqualError(t, err, "failed configuring container: couldn't create netem container: create netem container error")
 
 	e = errors.New("attach netem container error")
 	client.resetErrors()
 	client.errContainerAttach = e
 
 	err = s.configureContainers(context.Background())
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.EqualError(t, err, "failed configuring container: failed attaching container: attach netem container error")
 
 	e = errors.New("start netem container error")
 	client.resetErrors()
 	client.errContainerStart = e
 
 	err = s.configureContainers(context.Background())
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.EqualError(t, err, "failed configuring container: couldn't start netem container: start netem container error")
 
 	e = errors.New("encoding rules error")
 	client.resetErrors()
 	client.errAttachConn = e
 
 	err = s.configureContainers(context.Background())
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e), err.Error())
+	require.EqualError(t, err, "failed configuring container: couldn't encode the rules: encoding rules error")
 
 	e = errors.New("wait exec error")
 	client.resetErrors()
 	client.errEvent = e
 
 	err = s.Deploy(context.Background(), &testRound{})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e), err.Error())
+	require.EqualError(t, err, "couldn't configure the containers: failed configuring container: couldn't apply rule: wait exec error")
 }
 
 func TestStrategy_WaitExecFailures(t *testing.T) {
@@ -365,26 +352,23 @@ func TestStrategy_ExecuteFailure(t *testing.T) {
 	e := errors.New("log error")
 	client.errContainerLogs = e
 	err := s.Execute(context.Background(), &testRound{})
-	require.EqualError(t, err, "couldn't stream logs: log error")
+	require.EqualError(t, err, "failed streaming logs: failed accessing container logs: log error")
 
 	client.resetErrors()
 	e = errors.New("sim error")
 	err = s.Execute(context.Background(), &testRound{errBefore: e})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.EqualError(t, err, "couldn't execute: sim error")
 
 	e = errors.New("after error")
 	err = s.Execute(context.Background(), &testRound{errAfter: e})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.EqualError(t, err, "couldn't perform after step: after error")
 
 	s.updated = false
 	e = errors.New("container list error")
 	client.errContainerList = e
 
 	err = s.Execute(context.Background(), &testRound{})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.EqualError(t, err, "couldn't update the states: failed refreshing containers: container list error")
 }
 
 func TestStrategy_StreamLogsFailures(t *testing.T) {
@@ -400,8 +384,7 @@ func TestStrategy_StreamLogsFailures(t *testing.T) {
 	e := errors.New("log stream error")
 	client.errContainerLogs = e
 	err := s.streamLogs(context.Background())
-	require.Error(t, err)
-	require.True(t, errors.Is(err, e))
+	require.EqualError(t, err, "failed accessing container logs: log stream error")
 
 	client.resetErrors()
 	s.containers[1].Names = []string{"\000"}
@@ -457,8 +440,7 @@ func TestStrategy_CleanFailures(t *testing.T) {
 
 	client.errContainerList = errors.New("container list error")
 	err = s.Clean(context.Background())
-	require.Error(t, err)
-	require.True(t, errors.Is(err, client.errContainerList), err.Error())
+	require.EqualError(t, err, "couldn't get running containers: failed refreshing containers: container list error")
 
 	s.updated = true
 	s.containers = []types.Container{makeTestContainer("id:node0")}
@@ -702,6 +684,18 @@ func (c *testClient) Events(ctx context.Context, options types.EventsOptions) (<
 	}
 
 	return ch, nil
+}
+
+func (c *testClient) NetworkCreate(ctx context.Context, name string, options types.NetworkCreate) (types.NetworkCreateResponse, error) {
+	return types.NetworkCreateResponse{}, nil
+}
+
+func (c *testClient) NetworkConnect(ctx context.Context, networkID, container string, config *network.EndpointSettings) error {
+	return nil
+}
+
+func (c *testClient) NetworkRemove(ctx context.Context, networkID string) error {
+	return nil
 }
 
 type testDockerIO struct {
