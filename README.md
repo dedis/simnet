@@ -200,6 +200,8 @@ minikube start --docker-opt bip=172.18.0.1/16 --driver=virtualbox
 
 # In case of error, you can first try to delete the previous cluster.
 minikube delete
+# or
+kubectl delete --all deployment
 
 # After the cluster has started, you can monitor with the dashboard.
 minikube dashboard
