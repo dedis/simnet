@@ -81,20 +81,17 @@ func TestSimulation_Run(t *testing.T) {
 
 	stry.errDeploy = errors.New("deploy")
 	err = sim.Run(args)
-	require.Error(t, err)
-	require.True(t, errors.Is(err, stry.errDeploy))
+	require.EqualError(t, err, "couldn't deploy experiment: deploy")
 
 	stry.errDeploy = nil
 	stry.errExecute = errors.New("execute")
 	err = sim.Run(args)
-	require.Error(t, err)
-	require.True(t, errors.Is(err, stry.errExecute))
+	require.EqualError(t, err, "couldn't execute experiment: execute")
 
 	stry.errExecute = nil
 	stry.errStats = errors.New("stats")
 	err = sim.Run(args)
-	require.Error(t, err)
-	require.True(t, errors.Is(err, stry.errStats))
+	require.EqualError(t, err, "couldn't write statistics: stats")
 
 	stry.errStats = nil
 	stry.errClean = errors.New("clean")

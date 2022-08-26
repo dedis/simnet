@@ -13,6 +13,7 @@ import (
 func TestOption_Output(t *testing.T) {
 	// With a value
 	options := NewOptions([]Option{WithOutput("abc")})
+	os.Remove("abc")
 	require.Equal(t, "abc", options.OutputDir)
 
 	// Default with working home directory
@@ -31,6 +32,7 @@ func TestOption_Output(t *testing.T) {
 	}()
 
 	options = NewOptions([]Option{WithOutput("")})
+	os.RemoveAll(".config")
 	require.Equal(t, filepath.Join(".config", "simnet"), options.OutputDir)
 }
 

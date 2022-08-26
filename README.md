@@ -187,16 +187,21 @@ where the simulation can be deployed.
 Caveat: Minikube VM does not have the _sch_netem_ module which means Chaos
 testing does not work out of the box and requires a few steps more.
 
+Caveat2: On MacOS, use Virtual box as the driver. For historical reason Simnet
+won't work if using the default driver. Tested with VirtualBox 6.1.36.
+
 ### Install Minikube
 
 Follow the instructions [here](https://minikube.sigs.k8s.io/docs/start/) then
 
 ```bash
 # Start the cluster.
-minikube start --docker-opt bip=172.18.0.1/16
+minikube start --docker-opt bip=172.18.0.1/16 --driver=virtualbox
 
 # In case of error, you can first try to delete the previous cluster.
 minikube delete
+# or
+kubectl delete --all deployment
 
 # After the cluster has started, you can monitor with the dashboard.
 minikube dashboard

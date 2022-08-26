@@ -43,6 +43,7 @@ type Options struct {
 	TmpFS         []TmpVolume
 	VPNExecutable string
 	Data          map[string]interface{}
+	Update        func(opts *Options, nodeID string)
 }
 
 // NewOptions creates empty options.
@@ -71,7 +72,7 @@ func NewOptions(opts []Option) *Options {
 		o.OutputDir = filepath.Join(homeDir, ".config", "simnet")
 	}
 
-	err := os.Mkdir(o.OutputDir, 0755)
+	err := os.MkdirAll(o.OutputDir, 0755)
 	if err != nil && !errors.Is(err, fs.ErrExist) {
 		fmt.Println("failed creating simnet config dir: ", o.OutputDir, err)
 		panic(err)
@@ -191,5 +192,13 @@ func WithTmpFS(destination string, size int64) Option {
 			Destination: destination,
 			Size:        size,
 		})
+	}
+}
+
+// WithUpdate is an option to set an update callback to update options onces the
+// nodeID and IP is known.
+func WithUpdate(update func(opts *Options, nodeID string)) Option {
+	return func(opts *Options) {
+		opts.Update = update
 	}
 }
